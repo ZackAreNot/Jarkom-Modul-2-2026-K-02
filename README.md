@@ -686,16 +686,17 @@ Pengujian dilakukan dari klien **`alpha`** dengan memanggil URL melalui **hostna
 
 Pengujian dilakukan dari node klien **`alpha`** (`192.212.2.2`):
 
-1. **Uji Distribusi Beban (Load Balancing) Penny dan Abbey**:
-   ![Uji Load Balancing Proxy](Screenshot/soal-10/proxy-load-balancing.png)
+1. **Uji Distribusi Beban (Load Balancing) Penny -> Area Vault (Obladi & Desmond)**:
+   ![Uji Load Balancing Penny](Screenshot/soal-11/uji-distribusi-penny.png)
    - Pada pengujian `http://penny.k02.com/`, request didistribusikan secara bergantian (*round-robin*) antara **Node DESMOND** dan **Node OBLADI**.
-   - Pada pengujian `http://abbey.k02.com/profil`, request didistribusikan secara bergantian antara backend **MOLLY** dan **OBLADA**.
 
-2. **Uji Forwarding Header `Host` dan `X-Real-IP`**:
-   ![Uji Header Forwarding](Screenshot/soal-10/header-forwarding.png)
+2. **Uji Distribusi Beban (Load Balancing) Abbey -> Area Core (Oblada & Molly)**:
+   ![Uji Load Balancing Abbey](Screenshot/soal-11/uji-distribusi-beban-abbey.png)
+   - Pada pengujian `http://abbey.k02.com/profil`, request didistribusikan secara bergantian (*round-robin*) antara backend **MOLLY** dan **OBLADA**.
+
+3. **Uji Forwarding Header `Host` dan `X-Real-IP`**:
+   ![Uji Header Forwarding](Screenshot/soal-11/uji-penerusan-header.png)
    - Respon pada `http://abbey.k02.com/profil` membuktikan bahwa backend Area Core menerima:
      - `Forwarded Host: abbey.k02.com` (header Host asli yang dipanggil oleh klien).
      - `Forwarded X-Real-IP: 192.212.2.2` (alamat IP asli milik klien `alpha`).
      - `Backend Client Source IP: 192.212.4.2` (alamat IP perantara milik reverse proxy `abbey`).
-
----
