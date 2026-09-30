@@ -682,3 +682,4 @@ Pengujian dilakukan dari node klien **`alpha`** (`192.212.2.2`):
      - `Backend Client Source IP: 192.212.4.2` (alamat IP perantara milik reverse proxy `abbey`).
 
 ---
+## Soal 11: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing dan Header Forwarding
