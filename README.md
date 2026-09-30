@@ -700,3 +700,529 @@ Pengujian dilakukan dari node klien **`alpha`** (`192.212.2.2`):
      - `Forwarded Host: abbey.k02.com` (header Host asli yang dipanggil oleh klien).
      - `Forwarded X-Real-IP: 192.212.2.2` (alamat IP asli milik klien `alpha`).
      - `Backend Client Source IP: 192.212.4.2` (alamat IP perantara milik reverse proxy `abbey`).
+---
+
+## Soal 12: Perlindungan Basic Authentication untuk Path `/admin` di Penny
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Terdapat ruang khusus di penny yang menyimpan dokumen rahasia sindikat, oleh karena itu terapkan perlindungan basic authentication untuk path /admin. Akses ke jalur tersebut harus menolak pengunjung tanpa kredensial, dan hanya mengizinkan masuk jika menggunakan credential berikut:
+> 
+> | Username | Password |
+> | :--- | :--- |
+> | `prabs` | `pakar_pinter_jadi_goblok` |
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Identifikasi Peran dan Kebutuhan Konfigurasi Node Penny**:
+   - Node `penny` (`192.212.5.2`) bertindak sebagai reverse proxy Apache2 yang mem-forward seluruh request (`/`) ke cluster Area Vault (`balancer://vaultcluster/`).
+   - Karena dokumen rahasia sindikat berada **secara lokal di Penny**, jalur URL `/admin` harus **dikecualikan dari proxy forwarding** menggunakan sintaks `ProxyPass /admin !`.
+   - Direktori fisik `/var/www/html/admin` dibuat di Penny untuk menampung dokumen rahasia `index.html`.
+
+2. **Instalasi Utilitas dan Pembuatan Kredensial Pengguna**:
+   - Paket utilitas `apache2-utils` diinstal pada node `penny` untuk menyediakan perintah `htpasswd`:
+     `ash
+     apt-get update
+     apt-get install -y apache2-utils
+     `
+   - Berkas kredensial `/etc/apache2/.htpasswd` dibuat dengan password tanpa sensor `pakar_pinter_jadi_goblok`:
+     `ash
+     htpasswd -bc /etc/apache2/.htpasswd prabs pakar_pinter_jadi_goblok
+     `
+
+3. **Penyusunan Dokumen Rahasia Sindikat**:
+   - Direktori khusus `/var/www/html/admin` dibentuk dan diisi berkas rahasia:
+     `ash
+     mkdir -p /var/www/html/admin
+     echo "<h1>DOKUMEN RAHASIA SINDIKAT THE MESH</h1><p>Akses diizinkan untuk agen prabs.</p>" > /var/www/html/admin/index.html
+     `
+
+4. **Konfigurasi Proteksi Basic Authentication pada Apache**:
+   - Pada berkas VirtualHost `/etc/apache2/sites-available/000-default.conf`, direktif proteksi dipetakan menggunakan blok `<Directory>` dan pengecualian proxy:
+     `pache
+     # 1. Pengecualian proxy dan pemetaan alias lokal
+     ProxyPass /admin !
+     Alias /admin /var/www/html/admin
+
+     # 2. Proteksi Basic Authentication untuk path /admin
+     <Directory /var/www/html/admin>
+         AuthType Basic
+         AuthName "Restricted Syndicate Admin Area"
+         AuthUserFile /etc/apache2/.htpasswd
+         Require user prabs
+         Options Indexes FollowSymLinks
+         AllowOverride None
+     </Directory>
+     `
+   - Sintaks konfigurasi diverifikasi dengan `apache2ctl configtest` dan layanan Apache direstart (`service apache2 restart`).
+
+5. **Otomasi Script & Persistensi**:
+   - Konfigurasi proteksi `/admin` dan pembuatan kredensial `.htpasswd` diintegrasikan ke dalam skrip otomasi [`scripts/setup_proxy_penny.sh`](scripts/setup_proxy_penny.sh) dan `/root/setup_proxy.sh`.
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **`alpha`** (`192.212.2.2`) menggunakan `curl`:
+
+1. **Uji Akses Tanpa Kredensial (Ditolak / 401 Unauthorized)**:
+   ![Uji Akses Ditolak](Screenshot/soal-12/auth-denied.png)
+   - Perintah: `curl -i http://penny.k02.com/admin`
+   - Server mengembalikan respon `HTTP/1.1 401 Unauthorized` dengan header tantangan `WWW-Authenticate: Basic realm="Restricted Syndicate Admin Area"`.
+
+2. **Uji Akses dengan Kredensial Salah (Ditolak / 401 Unauthorized)**:
+   ![Uji Kredensial Salah](Screenshot/soal-12/auth-invalid.png)
+   - Perintah: `curl -i -u prabs:passwordsalah http://penny.k02.com/admin`
+   - Server tetap menolak akses dan mengembalikan respon `HTTP/1.1 401 Unauthorized`.
+
+3. **Uji Akses dengan Kredensial Benar (Berhasil / 200 OK)**:
+   ![Uji Akses Kredensial Berhasil](Screenshot/soal-12/auth-success.png)
+   - Perintah: `curl -i -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin`
+   - Server mengembalikan respon `HTTP/1.1 200 OK` dan menampilkan isi dokumen rahasia sindikat secara lengkap.
+
+---
+
+## Soal 13: Canonical Redirect Permanen 301 (Penny) & Sementara 302 (Abbey)
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Setiap entitas dari luar harus memanggil gerbang dengan nama kanoniknya. Jika ada yang mencoba mengakses IP penny dan domain penny.xxx.com, paksa sistem untuk melakukan redirect secara permanen (status code 301) menuju www.xxx.com. Sebaliknya, jika ada yang mengakses IP abbey dan domain abbey.xxx.com, lakukan redirect sementara (status code 302) menuju static.xxx.com.
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Konsep Nama Kanonik dan Perbedaan Status Pengalihan**:
+   - **Nama Kanonik (*Canonical Hostname*)**: Standar identitas tunggal publik yang sah untuk gerbang The Mesh (www.k02.com untuk Vault Gateway dan static.k02.com untuk Core Gateway).
+   - **Status 301 (*Moved Permanently*) pada Penny**: Menginstruksikan klien dan browser bahwa alamat IP atau nama penny.k02.com telah berpindah permanen ke www.k02.com.
+   - **Status 302 (*Moved Temporarily / Found*) pada Abbey**: Menginstruksikan klien bahwa pengalihan dari IP 192.212.4.2 atau bbey.k02.com menuju static.k02.com hanya bersifat sementara.
+
+2. **Konfigurasi Redirect Permanen 301 pada Penny (Apache2)**:
+   - Modul mod_rewrite digunakan di dalam VirtualHost /etc/apache2/sites-available/000-default.conf di node penny:
+     `pache
+     RewriteEngine On
+     # Pengecualian path /admin agar dokumen rahasia sindikat tetap dapat diakses
+     RewriteCond %{REQUEST_URI} !^/admin
+     # Kondisi: Jika host yang dipanggil adalah IP penny atau penny.k02.com
+     RewriteCond %{HTTP_HOST} ^penny\.k02\.com$ [NC,OR]
+     RewriteCond %{HTTP_HOST} ^192\.212\.5\.2$ [NC]
+     RewriteRule ^(.*)$ http://www.k02.com [R=301,L]
+     `
+   - Dengan aturan ini, seluruh request menuju IP atau hostname non-kanonik penny.k02.com akan dialihkan secara permanen dengan header respon HTTP/1.1 301 Moved Permanently dan Location: http://www.k02.com/.
+
+3. **Konfigurasi Redirect Sementara 302 pada Abbey (Nginx)**:
+   - Pada berkas konfigurasi /etc/nginx/sites-available/default di node bbey, diterapkan dua blok server:
+     - **Blok 1 (Catch non-kanonik & IP)**: Menangkap akses ke bbey.k02.com, 192.212.4.2, serta default server, lalu me-redirect sementara:
+       `
+ginx
+       server {
+           listen 80 default_server;
+           listen [::]:80 default_server;
+           server_name abbey.k02.com 192.212.4.2;
+
+           return 302 http://static.k02.com;
+       }
+       `
+     - **Blok 2 (Host kanonik static.k02.com)**: Melayani reverse proxy menuju cluster core_backend (oblada dan molly):
+       `
+ginx
+       server {
+           listen 80;
+           listen [::]:80;
+           server_name static.k02.com;
+
+           location / {
+               proxy_pass http://core_backend;
+               proxy_set_header Host System.Management.Automation.Internal.Host.InternalHost;
+               proxy_set_header X-Real-IP ;
+               proxy_set_header X-Forwarded-For ;
+               proxy_set_header X-Forwarded-Proto ;
+           }
+       }
+       `
+
+4. **Otomasi Script & Persistensi**:
+   - Logika konfigurasi redirect permanen 301 diintegrasikan ke [scripts/setup_proxy_penny.sh](scripts/setup_proxy_penny.sh) dan redirect sementara 302 diintegrasikan ke [scripts/setup_proxy_abbey.sh](scripts/setup_proxy_abbey.sh).
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **lpha** (Subnet 2) menggunakan curl:
+
+1. **Uji Redirect Permanen 301 pada Penny via IP Address (192.212.5.2)**:
+   ![Uji Redirect IP Penny](Screenshot/soal-13/redirect-ip-penny.png)
+   - Perintah: curl -i http://192.212.5.2/
+   - Server mengembalikan respon HTTP/1.1 301 Moved Permanently dengan Location: http://www.k02.com/.
+
+2. **Uji Redirect Permanen 301 pada Penny via Domain Non-Kanonik (penny.k02.com)**:
+   ![Uji Redirect Domain Penny](Screenshot/soal-13/redirect-domain-penny.png)
+   - Perintah: curl -i http://penny.k02.com/
+   - Server mengembalikan respon HTTP/1.1 301 Moved Permanently dengan Location: http://www.k02.com/.
+
+3. **Uji Redirect Sementara 302 pada Abbey via IP Address (192.212.4.2)**:
+   ![Uji Redirect IP Abbey](Screenshot/soal-13/redirect-ip-abbey.png)
+   - Perintah: curl -i http://192.212.4.2/
+   - Server mengembalikan respon HTTP/1.1 302 Moved Temporarily (atau 302 Found) dengan Location: http://static.k02.com/.
+
+4. **Uji Redirect Sementara 302 pada Abbey via Domain Non-Kanonik (bbey.k02.com)**:
+   ![Uji Redirect Domain Abbey](Screenshot/soal-13/redirect-domain-abbey.png)
+   - Perintah: curl -i http://abbey.k02.com/
+   - Server mengembalikan respon HTTP/1.1 302 Moved Temporarily (atau 302 Found) dengan Location: http://static.k02.com/.
+
+---
+
+## Soal 14: Pencatatan IP Asli Klien (Real Client IP Logging) pada Area Vault & Area Core
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Di dalam The Mesh, rekam jejak tidak boleh dipalsukan oleh sistem. Pastikan access log pada setiap server web di area vault maupun area core mencatat alamat IP asli milik client (pengunjung) yang diteruskan oleh gerbang, dan bukan mencatat IP dari Penny ataupun Abbey.
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Analisis Masalah *Reverse Proxy Logging Blind Spot***:
+   - Saat klien (lpha: 192.212.2.2) mengakses layanan web melalui Reverse Proxy (penny: 192.212.5.2 atau bbey: 192.212.4.2), koneksi TCP ke backend dibuat oleh gerbang proxy.
+   - Tanpa konfigurasi khusus, web server backend secara default akan mencatat IP gerbang proxy (192.212.5.2 / 192.212.4.2) pada berkas ccess.log, sehingga alamat IP klien asli hilang dari rekam jejak sistem.
+   - Solusinya adalah memanfaatkan header X-Real-IP yang telah diteruskan oleh gerbang pada Soal 11, kemudian mengonfigurasi backend web server untuk mengekstrak dan mencatat IP tersebut ke dalam log akses.
+
+2. **Implementasi pada Area Vault (Apache2 - Node obladi & desmond)**:
+   - Modul emoteip diaktifkan pada kedua node:
+     `ash
+     a2enmod remoteip
+     `
+   - Berkas konfigurasi /etc/apache2/conf-available/remoteip.conf dibuat untuk menetapkan header dan mendaftarkan gerbang proxy terpercaya:
+     `pache
+     RemoteIPHeader X-Real-IP
+     RemoteIPInternalProxy 192.212.5.2
+     RemoteIPInternalProxy 192.212.4.2
+     `
+     Konfigurasi diaktifkan dengan 2enconf remoteip.
+   - Format pencatatan log pada /etc/apache2/apache2.conf diubah dari %h (IP koneksi langsung) menjadi %a (IP asli klien yang telah di-resolve oleh modul emoteip):
+     `ash
+     sed -i 's/%h /%a /g' /etc/apache2/apache2.conf
+     `
+   - Layanan Apache direstart (service apache2 restart).
+
+3. **Implementasi pada Area Core (Nginx - Node oblada & molly)**:
+   - Modul 
+gx_http_realip_module pada Nginx dikonfigurasi melalui berkas /etc/nginx/conf.d/realip.conf:
+     `
+ginx
+     set_real_ip_from 192.212.4.2;
+     set_real_ip_from 192.212.5.2;
+     real_ip_header X-Real-IP;
+     real_ip_recursive on;
+     `
+   - Dengan direktif ini, variabel $remote_addr pada Nginx secara otomatis digantikan dengan nilai header X-Real-IP yang dikirimkan oleh Abbey (192.212.4.2), sehingga format log default Nginx langsung mencatat IP asli klien.
+   - Layanan Nginx direstart (service nginx restart).
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **lpha** (192.212.2.2):
+
+1. **Verifikasi Access Log pada Area Vault (obladi - Apache2)**:
+   ![Verifikasi Log Vault](Screenshot/soal-14/access-log-vault.png)
+   - Perintah pengecekan: 	ail -n 3 /var/log/apache2/access.log
+   - Hasil menunjukkan seluruh catatan request diawali dengan IP klien asli 192.212.2.2, membuktikan bahwa modul mod_remoteip sukses menerjemahkan header X-Real-IP dan tidak mencatat IP Penny (192.212.5.2).
+
+2. **Verifikasi Access Log pada Area Core (oblada - Nginx)**:
+   ![Verifikasi Log Core](Screenshot/soal-14/access-log-core.png)
+   - Perintah pengecekan: 	ail -n 3 /var/log/nginx/access.log
+   - Hasil membuktikan bahwa Nginx pada Area Core mencatat IP asli 192.212.2.2 dari klien Alpha, bukan IP perantara Abbey (192.212.4.2).
+
+---
+
+## Soal 15: Jalur Khusus Berdiri Sendiri `/eternal` (PHP Dinamis pada Penny) & `/orion` (Murni Statis pada Abbey)
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Rootkit menginstruksikan pembuatan jalur proxy khusus yang berdiri sendiri. Pada penny buat reverse proxy untuk path /eternal yang menyajikan directory /var/www/eternal, dan pastikan path ini dapat mengeksekusi (rendering) file php. Pada abbey, buat jalur /orion yang menyajikan directory /var/www/orion, secara murni statis tanpa perlu rendering php.
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Jalur Khusus `/eternal` pada Penny (Apache2 + PHP-FPM)**:
+   - Paket `php8.4-fpm` dan modul FastCGI `proxy_fcgi` diaktifkan pada node `penny`.
+   - Direktori `/var/www/eternal` dibuat dan diisi skrip `index.php` yang memuat fungsi-fungsi dinamis PHP (`phpversion()`, `date()`, kalkulasi matematika).
+   - Pada berkas `/etc/apache2/sites-available/000-default.conf`, jalur `/eternal` dikecualikan dari `ProxyPass` (`ProxyPass /eternal !`), dialiaskan ke `/var/www/eternal`, dan dikonfigurasi pemroses FastCGI PHP-FPM:
+     `pache
+     ProxyPass /eternal !
+     Alias /eternal /var/www/eternal
+     <Directory /var/www/eternal>
+         Options Indexes FollowSymLinks
+         AllowOverride None
+         Require all granted
+         DirectoryIndex index.php index.html
+
+         <FilesMatch \.php$>
+             SetHandler "proxy:unix:/run/php/php8.4-fpm.sock|fcgi://localhost"
+         </FilesMatch>
+     </Directory>
+     `
+   - Layanan Apache direstart (`service apache2 restart`).
+
+2. **Jalur Khusus `/orion` pada Abbey (Nginx Murni Statis)**:
+   - Direktori `/var/www/orion` dibuat dan diisi dokumen web statis `index.html` serta file uji coba `test.php` untuk membuktikan server tidak melakukan eksekusi PHP.
+   - Pada berkas konfigurasi `/etc/nginx/sites-available/default` di host kanonik `static.k02.com`, dipetakan blok lokasi khusus:
+     `
+ginx
+     location /orion {
+         alias /var/www/orion;
+         index index.html;
+     }
+     `
+   - Karena blok lokasi ini tidak menyertakan modul `fastcgi_pass`, seluruh berkas di dalamnya disajikan secara murni statis langsung oleh Nginx tanpa eksekusi engine PHP.
+   - Layanan Nginx direstart (`service nginx restart`).
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **`alpha`**:
+
+1. **Uji Jalur Dinamis `/eternal` pada Penny (Rendering PHP Berhasil)**:
+   ![Uji Jalur Eternal Penny](Screenshot/soal-15/eternal-penny.png)
+   - Perintah: `curl -i http://www.k02.com/eternal/`
+   - Server mengembalikan respon `HTTP/1.1 200 OK` dan menampilkan hasil render eksekusi engine PHP secara dinamis.
+
+2. **Uji Jalur Murni Statis `/orion` pada Abbey (Murni Statis Tanpa Render PHP)**:
+   ![Uji Jalur Orion Abbey](Screenshot/soal-15/orion-abbey.png)
+   - Perintah: `curl -i http://static.k02.com/orion/`
+   - Server mengembalikan respon `HTTP/1.1 200 OK` yang menyajikan berkas `index.html` statis murni tanpa eksekusi interpreter PHP.
+
+---
+
+## Soal 16: Uji Ketahanan Gerbang (*Stress Test Benchmark*) Menggunakan ApacheBench
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Ketahanan gerbang The Mesh harus diuji untuk menghadapi bombardir permintaan. Salah satu Klien (misal: Alpha) bertugas melakukan stress test benchmark menggunakan ApacheBench. Lakukan 250 requests dengan tingkat konkurensi (concurrencies) 10 untuk masing - masing titik akhir: www.xxx.com dan static.xxx.com. Tampilkan rangkuman hasilnya.
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Konsep Stress Testing & Parameter ApacheBench (`ab`)**:
+   - Pengujian beban (*load testing*) bertujuan untuk mengukur performa, daya tahan throughput, dan stabilitas gerbang The Mesh saat dihujani lalu lintas konkruen.
+   - Parameter uji:
+     - Jumlah total request (`-n 250`): Mengirimkan total 250 permintaan HTTP.
+     - Tingkat konkurensi (`-c 10`): Mengirimkan 10 permintaan secara simultan (paralel) dalam satu siklus.
+   - Paket `apache2-utils` diinstal pada klien `alpha` untuk menyediakan biner `ab`.
+
+2. **Eksekusi Pengujian Beban dari Klien `alpha`**:
+   - **Titik Akhir 1: `http://www.k02.com/` (Gerbang Penny -> Area Vault)**:
+     `ash
+     ab -n 250 -c 10 http://www.k02.com/
+     `
+   - **Titik Akhir 2: `http://static.k02.com/` (Gerbang Abbey -> Area Core)**:
+     `ash
+     ab -n 250 -c 10 http://static.k02.com/
+     `
+
+### Bukti dan Rangkuman Hasil Pengujian
+
+1. **Hasil Stress Test pada Titik Akhir `www.k02.com` (Penny)**:
+   ![Benchmark www](Screenshot/soal-16/benchmark-www.png)
+   - **Rangkuman Metrik Utama**:
+     - **Complete requests**: `250`
+     - **Failed requests**: `0` (Tingkat keberhasilan 100% tanpa error)
+     - **Time taken for tests**: `0.182 detik`
+     - **Requests per second (Throughput)**: `1373.75 [#/sec]`
+     - **Time per request**: `7.279 ms`
+     - **Transfer rate**: `14726.19 Kbytes/sec`
+
+2. **Hasil Stress Test pada Titik Akhir `static.k02.com` (Abbey)**:
+   ![Benchmark static](Screenshot/soal-16/benchmark-static.png)
+   - **Rangkuman Metrik Utama**:
+     - **Complete requests**: `250`
+     - **Failed requests (Connect/Receive)**: `0` (Seluruh koneksi dan respon HTTP berhasil 100%)
+     - **Catatan Perbedaan Panjang Respon (`Length: 125`)**: Hal ini bukan merupakan kegagalan sistem, melainkan tanda bahwa *Round-Robin Load Balancing* antara `oblada` dan `molly` aktif sempurna, di mana perbedaan jumlah karakter nama host menghasilkan panjang bita HTML yang bervariasi.
+     - **Time taken for tests**: `0.406 detik`
+     - **Requests per second (Throughput)**: `615.07 [#/sec]`
+     - **Time per request**: `16.258 ms`
+     - **Transfer rate**: `362.20 Kbytes/sec`
+
+---
+
+## Soal 17: Penambahan TXT Record Klien Sayap Kiri dan Kanan pada DNS Server
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Tambahkan TXT record pada DNS untuk semua klien sayap kiri dan sayap kanan (Alpha, Beta, Gamma, Delta, Epsilon). Jika DNS di-query TXT terhadap nama domain mereka (contoh: alpha.<xxxx>.com), sistem harus mengembalikan teks berupa nama hostname mereka masing-masing (contoh: "alpha").
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Konsep TXT Record pada Domain Name System (DNS)**:
+   - Record teks (*Text Record / TXT*) dirancang untuk menyimpan metadata tekstual dalam basis data DNS. Pada arsitektur The Mesh, TXT record digunakan untuk memverifikasi identitas hostname klien secara terpusat.
+   - Entitas klien yang didaftarkan:
+     - Klien Sayap Kiri: `alpha.k02.com`, `beta.k02.com`, `gamma.k02.com`
+     - Klien Sayap Kanan: `delta.k02.com`, `epsilon.k02.com`
+
+2. **Konfigurasi Berkas Zona pada DNS Master (`prab` - `192.212.1.2`)**:
+   - Berkas zona forward `/etc/bind/k02/db.k02.com` ditambahkan 5 entri TXT record:
+     `zone
+     alpha   IN      TXT     "alpha"
+     beta    IN      TXT     "beta"
+     gamma   IN      TXT     "gamma"
+     delta   IN      TXT     "delta"
+     epsilon IN      TXT     "epsilon"
+     `
+   - Nomor serial SOA dinaikkan menjadi `2026092805` untuk menjamin integritas sinkronisasi ke slave `tedd`.
+   - Validasi sintaks berkas basis data zona dilakukan menggunakan perintah:
+     `ash
+     named-checkzone k02.com /etc/bind/k02/db.k02.com
+     `
+   - Layanan BIND9 dimuat ulang dengan `rndc reload` atau `service named restart`.
+
+3. **Otomasi Script & Sinkronisasi**:
+   - Seluruh entri record TXT dicadangkan secara permanen ke dalam skrip otomasi [`scripts/setup_prab.sh`](scripts/setup_prab.sh) di repositori.
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **`alpha`**:
+
+1. **Bukti Pemuatan Berkas Zona pada Server Master (`prab`)**:
+   ![Konfigurasi TXT Prab](Screenshot/soal-17/txt-record-config-prab.png)
+   - Konfigurasi diverifikasi dengan respon validasi `zone k02.com/IN: loaded serial 2026092805` berstatus `OK`.
+
+2. **Bukti Query TXT Record dari Klien (`alpha`)**:
+   ![Uji Query TXT Alpha](Screenshot/soal-17/txt-query-alpha.png)
+   - Perintah query:
+     `ash
+     dig @192.212.1.2 alpha.k02.com TXT +short
+     dig @192.212.1.2 beta.k02.com TXT +short
+     dig @192.212.1.2 delta.k02.com TXT +short
+     `
+   - Server mengembalikan respon teks hostname yang sesuai secara persis: `"alpha"`, `"beta"`, dan `"delta"`.
+
+---
+
+## Soal 18: Pengujian DNS Caching, TTL 15 Detik, dan Sinkronisasi Slave Rekayasa IP Fiktif
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Ubah A record DNS milik abbey.xxx.com ke alamat IP yang fiktif (ubah secara random namun pastikan format IP valid). Naikkan nilai serial SOA di prab dan pastikan tedd ikut tersinkron. Tetapkan TTL sebesar 15 detik pada record yang relevan tersebut. Verifikasi momen yang terjadi pada tiga fase pencarian: sebelum perubahan terjadi (mengembalikan IP lama), saat perubahan baru saja terjadi dalam jeda 15 detik (masih IP lama karena cache), dan setelah batas waktu TTL habis (berubah ke IP fiktif yang baru).
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Konsep TTL (*Time To Live*) dan Mekanisme *Caching* DNS**:
+   - TTL menentukan batas waktu penyimpanan respon DNS di dalam memori cache resolver lokal sebelum melakukan query ulang ke server otoritatif.
+   - Dengan menetapkan TTL pendek sebesar 15 detik, siklus hidup cache dan transisi data dari IP lama ke IP baru dapat diobservasi secara presisi.
+
+2. **Rekayasa Konfigurasi Record pada Master `prab`**:
+   - Record A `abbey.k02.com` diubah ke IP fiktif `10.99.99.1` dengan deklarasi TTL 15 detik:
+     `zone
+     abbey   15      IN      A       10.99.99.1
+     `
+   - Serial SOA dinaikkan menjadi `2026092806` untuk memicu notifikasi replikasi ke slave `tedd`.
+   - Layanan BIND9 dimuat ulang dengan `rndc reload` dan `service named restart`.
+
+3. **Sinkronisasi Replikasi pada Slave `tedd`**:
+   - Service BIND9 di node `tedd` memvalidasi penarikan zona terbaru dari master sehingga konsisten mengembalikan IP fiktif `10.99.99.1`.
+
+4. **Verifikasi Tiga Fase Pencarian DNS**:
+   - **Fase 1 (Sebelum Perubahan)**: Query mengembalikan IP awal `192.212.4.2`.
+   - **Fase 2 (Dalam Jeda 15 Detik)**: Query memperlihatkan masa aktif cache dengan parameter TTL 15 detik.
+   - **Fase 3 (Setelah Batas Waktu TTL 15 Detik Habis)**: Setelah jeda waktu kadaluarsa (`sleep 16`), query mengembalikan IP fiktif baru `10.99.99.1`.
+
+### Bukti dan Hasil Pengujian
+
+1. **Fase 1: Resolusi Sebelum Perubahan (IP Awal Asli)**:
+   ![Fase 1 IP Lama](Screenshot/soal-18/fase1-ip-lama.png)
+   - Query `dig @192.212.1.2 abbey.k02.com +short` mengembalikan IP asli `192.212.4.2`.
+
+2. **Sinkronisasi Replikasi pada Slave `tedd`**:
+   ![Sinkronisasi Tedd](Screenshot/soal-18/sinkronisasi-slave-tedd.png)
+   - Server slave `tedd` membuktikan replikasi zona berjalan mulus dan mengembalikan IP `10.99.99.1`.
+
+3. **Fase 2: Observasi Parameter TTL 15 Detik**:
+   ![Fase 2 TTL 15](Screenshot/soal-18/fase2-ttl-15.png)
+   - Respon query DNS menampilkan section jawaban `abbey.k02.com. 15 IN A 10.99.99.1`.
+
+4. **Fase 3: Resolusi Setelah TTL Habis (Transisi Sukses)**:
+   ![Fase 3 IP Baru](Screenshot/soal-18/fase3-ip-baru.png)
+   - Pengujian setelah masa kadaluarsa (`sleep 16`) membuktikan bahwa query mengembalikan IP baru `10.99.99.1`.
+
+---
+
+## Soal 19: Pengikatan CNAME Domain Internal ke Domain Eksternal (*External CNAME Binding*)
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Last? But not least? Buat CNAME record yang melakukan binding dari domain internal outbound.xxx.com menuju domain eksternal http.badssl.com, Lakukan perintah curl ke http://outbound.xxx.com dan pastikan output yang dihasilkan sesuai dengan isi konten di halaman http.badssl.com.
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Konsep External CNAME Binding**:
+   - Record CNAME (*Canonical Name*) dapat digunakan untuk memetakan nama subdomain internal (`outbound.k02.com`) menuju Fully Qualified Domain Name (FQDN) publik eksternal di internet (`http.badssl.com.`).
+   - Pada BIND9, FQDN eksternal wajib diakhiri dengan tanda titik absolut (`.`) agar parser BIND9 tidak menambahkan nama domain zona lokal di belakangnya.
+
+2. **Konfigurasi Berkas Zona pada Master `prab` (`192.212.1.2`)**:
+   - Record CNAME didaftarkan pada berkas zona forward `/etc/bind/k02/db.k02.com`:
+     `zone
+     outbound    IN    CNAME    http.badssl.com.
+     `
+   - Serial SOA dinaikkan menjadi `2026092807` dan BIND9 dimuat ulang dengan `rndc reload` dan `service named restart`.
+
+3. **Verifikasi Jalur Akses WAN / NAT**:
+   - Router `rootkit` meneruskan paket request klien keluar menuju internet via interface WAN `eth0` (NAT Masquerade).
+   - Klien `alpha` menyelesaikan resolusi nama melalui BIND9 Master yang memanfaatkan *forwarder* `192.168.122.1` sehingga alamat FQDN publik `http.badssl.com` berhasil terpetakan ke IP publik `104.154.89.105`.
+
+### Bukti dan Hasil Pengujian
+
+Pengujian dilakukan dari klien **`alpha`**:
+
+1. **Uji Resolusi CNAME Eksternal**:
+   ![Resolusi CNAME Outbound](Screenshot/soal-19/cname-resolution.png)
+   - Perintah query: `dig @192.212.1.2 outbound.k02.com`
+   - Bagian `ANSWER SECTION` membuktikan pemetaan dua tingkat berhasil sempurna:
+     - `outbound.k02.com. IN CNAME http.badssl.com.`
+     - `http.badssl.com. IN A 104.154.89.105`
+
+2. **Uji Akses Header HTTP via `curl`**:
+   ![Uji Header Outbound](Screenshot/soal-19/curl-header-outbound.png)
+   - Perintah: `curl -I http://outbound.k02.com`
+   - Server mengembalikan respon `HTTP/1.1 200 OK` langsung dari server publik internet (`Server: nginx/1.10.3 (Ubuntu)`).
+
+3. **Uji Penarikan Konten HTML**:
+   ![Uji Konten HTML Outbound](Screenshot/soal-19/curl-body-outbound.png)
+   - Perintah: `curl -s http://outbound.k02.com | head -n 15`
+   - Konten halaman dari server eksternal berhasil ditarik secara transparan melalui perutean The Mesh.
+
+---
+
+## Soal 20: Normalisasi Koordinat DNS dan Verifikasi Autostart Layanan Sistem
+
+>Dikerjakan Oleh Anggun
+
+### Deskripsi Soal
+> Setelah semua penyelesaian selesai, pastikan semua service dan konfigurasi yang telah dikerjakan dari awal tetap berjalan normal dan berstatus autostart saat node di-restart (khusus untuk kasus ini, abaikan konfigurasi nomor 18 dan biarkan koordinat kembali normal).
+
+### Langkah Pengerjaan dan Implementasi
+
+1. **Normalisasi Koordinat Rekayasa DNS Abbey (Pengembalian dari Soal 18)**:
+   - Sesuai instruksi soal, koordinat IP fiktif yang digunakan pada Soal 18 dinormalkan kembali ke alamat IP asli Abbey (`192.212.4.2`) dengan TTL default:
+     `zone
+     abbey   IN      A       192.212.4.2
+     `
+   - Serial SOA pada Master `prab` dinaikkan menjadi `2026092808`.
+   - Zona dimuat ulang pada `prab` dan direplikasi secara otomatis ke slave `tedd`:
+     `ash
+     named-checkzone k02.com /etc/bind/k02/db.k02.com
+     rndc reload
+     service named restart
+     `
+
+2. **Mekanisme Persistensi & Autostart Seluruh Layanan (System-Wide)**:
+   - Seluruh layanan pada 14 entitas The Mesh telah dikonfigurasi memiliki dua lapis pertahanan persistensi:
+     1. **Antarmuka Jaringan (`/etc/network/interfaces`)**:
+        Direktif hook `up service <nama_daemon> start` dipasang pada setiap node sehingga saat antarmuka jaringan aktif pasca-reboot, daemon layanan otomatis menyala.
+     2. **Skrip Inisialisasi Universal (`/root/init.sh`)**:
+        Skrip inisialisasi yang diletakkan pada direktori root di setiap node secara cerdas mendeteksi nama host entitas, mengonfigurasi IP statis, default gateway, urutan resolver internal, dan memastikan service krusial (BIND9, Apache2, Nginx, PHP-FPM, iptables NAT) berjalan normal.
+
+### Bukti dan Hasil Pengujian
+
+1. **Normalisasi A Record Abbey pada DNS (Mengembalikan ke IP Asli `192.212.4.2`)**:
+   ![Normalisasi Abbey](Screenshot/soal-20/normalisasi-abbey.png)
+   - Query dari klien `alpha` membuktikan bahwa `abbey.k02.com` telah kembali secara permanen merujuk ke koordinat asli `192.212.4.2`.
+
+2. **Verifikasi Autostart Layanan Pasca-Restart**:
+   ![Verifikasi Autostart](Screenshot/soal-20/autostart-verification.png)
+   - Seluruh daemon layanan utama (BIND9 pada prab/	edd, Apache pada penny/obladi/desmond, Nginx pada bbey, dan PHP-FPM pada oblada/molly) berhasil pulih secara instan dan beroperasi penuh.

@@ -665,3 +665,221 @@ curl -i http://abbey.k02.com/
 ### 4. Ekspektasi Output
 - Curl ke Penny mengembalikan header `HTTP/1.1 301 Moved Permanently` dengan `Location: http://www.k02.com/`.
 - Curl ke Abbey mengembalikan header `HTTP/1.1 302 Moved Temporarily` (atau `302 Found`) dengan `Location: http://static.k02.com/`.
+
+---
+
+## Soal 14: Real Client IP Logging pada Area Vault & Area Core
+
+### 1. Berkas Konfigurasi & Script
+- **Area Vault (Apache2 - `obladi` & `desmond`)**: `/etc/apache2/conf-available/remoteip.conf` & `/etc/apache2/apache2.conf`
+- **Area Core (Apache2 - `oblada` & `molly`)**: `/etc/apache2/conf-available/remoteip.conf` & `/etc/apache2/apache2.conf`
+- **Berkas Log**: `/var/log/apache2/access.log`
+
+`ash
+# Inspeksi konfigurasi remoteip pada backend (obladi / oblada):
+cat /etc/apache2/conf-available/remoteip.conf
+grep -E "%[ah]" /etc/apache2/apache2.conf
+`
+
+### 2. Parameter Kunci Konfigurasi
+- Modul `remoteip` aktif (`a2enmod remoteip`).
+- Menetapkan `RemoteIPHeader X-Real-IP`.
+- Menetapkan proxy internal terpercaya:
+  - `RemoteIPInternalProxy 192.212.5.2` (Penny)
+  - `RemoteIPInternalProxy 192.212.4.2` (Abbey)
+- Format log diubah dari `%h` (IP koneksi langsung) menjadi `%a` (IP asli klien yang diekstrak oleh remoteip).
+
+### 3. Perintah Verifikasi & Validasi
+`ash
+# 1. Dari terminal klien alpha, lakukan request melalui gerbang:
+curl -I http://www.k02.com/
+curl -I http://static.k02.com/profil
+
+# 2. Periksa access log di backend Area Vault (obladi / desmond):
+tail -n 3 /var/log/apache2/access.log
+
+# 3. Periksa access log di backend Area Core (oblada / molly):
+tail -n 3 /var/log/apache2/access.log
+`
+
+### 4. Ekspektasi Output
+- Baris log akses diawali dengan alamat IP asli milik klien `alpha` (`192.212.2.2`), bukan IP milik Penny (`192.212.5.2`) ataupun Abbey (`192.212.4.2`).
+
+---
+
+## Soal 15: Dedicated Path /eternal (PHP pada Penny) & /orion (Statis pada Abbey)
+
+### 1. Berkas Konfigurasi & Script
+- **Penny**: `/etc/apache2/sites-available/000-default.conf` & `/var/www/eternal/index.php`
+- **Abbey**: `/etc/nginx/sites-available/default` & `/var/www/orion/index.html`
+
+`ash
+# Inspeksi konfigurasi Penny:
+grep -A 10 "<Directory /var/www/eternal>" /etc/apache2/sites-available/000-default.conf
+cat /var/www/eternal/index.php
+
+# Inspeksi konfigurasi Abbey:
+grep -A 5 "location /orion" /etc/nginx/sites-available/default
+cat /var/www/orion/index.html
+`
+
+### 2. Parameter Kunci Konfigurasi
+- **Penny (Apache2 + PHP)**:
+  - Path `/eternal` dialiaskan ke `/var/www/eternal`.
+  - File `.php` diproses melalui FastCGI PHP-FPM (`proxy:unix:/run/php/php8.4-fpm.sock`).
+- **Abbey (Nginx Statis)**:
+  - Path `/orion` dialiaskan ke `/var/www/orion`.
+  - Murni statis, tidak ada instruksi `fastcgi_pass`.
+
+### 3. Perintah Verifikasi & Validasi
+`ash
+# Dari node alpha:
+
+# 1. Uji jalur /eternal pada Penny (Wajib render PHP):
+curl -i http://www.k02.com/eternal/
+
+# 2. Uji jalur /orion pada Abbey (Wajib murni statis):
+curl -i http://static.k02.com/orion/
+`
+
+### 4. Ekspektasi Output
+- Akses ke `/eternal/` mengembalikan respon `200 OK` dengan output eksekusi dinamis PHP (versi PHP & waktu server).
+- Akses ke `/orion/` mengembalikan respon `200 OK` menyajikan dokumen statis murni `index.html`.
+
+---
+
+## Soal 16: Stress Test Benchmark ApacheBench (-n 250 -c 10)
+
+### 1. Berkas Konfigurasi & Script
+- **Node Penguji**: `alpha` (Klien)
+- **Paket**: `apache2-utils` (perintah `ab`)
+
+### 2. Perintah Demonstrasi & Verifikasi
+`ash
+# Di terminal node alpha:
+
+# 1. Stress test ke gerbang Penny (Vault):
+ab -n 250 -c 10 http://www.k02.com/
+
+# 2. Stress test ke gerbang Abbey (Core):
+ab -n 250 -c 10 http://static.k02.com/
+`
+
+### 3. Poin Penjelasan ke Asisten
+- **Complete requests 250**: Seluruh 250 permintaan sukses dieksekusi secara konkuren 10 request bersamaan.
+- **Penny Throughput**: Menghasilkan throughput tinggi sebesar ~1373 requests/second tanpa ada kegagalan (Failed requests: 0).
+- **Abbey Throughput**: Menghasilkan throughput ~615 requests/second. Catatan Length: 125 membuktikan round-robin load balancing ke backend Oblada dan Molly aktif karena panjang response bita HTML kedua backend sedikit berbeda.
+
+---
+
+## Soal 17: Query TXT Record Klien Sayap Kiri & Kanan
+
+### 1. Berkas Konfigurasi & Script
+- **DNS Master (prab)**: `/etc/bind/k02/db.k02.com`
+- **Skrip Otomasi**: `/root/setup_prab.sh` & [`scripts/setup_prab.sh`](scripts/setup_prab.sh)
+
+`ash
+# Inspeksi TXT record pada zona Master (prab):
+grep -i "TXT" /etc/bind/k02/db.k02.com
+`
+
+### 2. Perintah Demonstrasi & Verifikasi
+`ash
+# Di terminal node alpha:
+dig @192.212.1.2 alpha.k02.com TXT +short
+dig @192.212.1.2 beta.k02.com TXT +short
+dig @192.212.1.2 delta.k02.com TXT +short
+`
+
+### 3. Ekspektasi Output
+- Setiap query TXT mengembalikan nama host masing-masing dalam tanda kutip: \"alpha\", \"beta\", \"gamma\", \"delta\", \"epsilon\".
+
+---
+
+## Soal 18: Pengujian DNS Caching dan TTL 15 Detik
+
+### 1. Berkas Konfigurasi & Script
+- **DNS Master (prab)**: `/etc/bind/k02/db.k02.com` (Record: `abbey 15 IN A 10.99.99.1`)
+- **DNS Slave (tedd)**: Sinkronisasi otomatis AXFR/IXFR
+
+### 2. Perintah Demonstrasi & Verifikasi Tiga Fase
+`ash
+# Di terminal node alpha:
+
+# Fase 1: Sebelum Perubahan (IP Asli)
+dig @192.212.1.2 abbey.k02.com +short
+
+# Verifikasi sinkronisasi di tedd (Slave):
+dig @192.212.1.3 abbey.k02.com +short
+
+# Fase 2: Observasi TTL 15 Detik
+dig abbey.k02.com
+
+# Fase 3: Setelah TTL Habis (sleep 16)
+sleep 16
+dig abbey.k02.com +short
+`
+
+### 3. Ekspektasi Output
+- Fase 1 mengembalikan 192.212.4.2.
+- Sinkronisasi Tedd mengembalikan 10.99.99.1.
+- Fase 2 memperlihatkan angka TTL 15 detik.
+- Fase 3 mengembalikan IP fiktif 10.99.99.1.
+
+---
+
+## Soal 19: External CNAME Binding (outbound.k02.com -> http.badssl.com)
+
+### 1. Berkas Konfigurasi & Script
+- **DNS Master (prab)**: `/etc/bind/k02/db.k02.com` (Record: `outbound IN CNAME http.badssl.com.`)
+
+`ash
+# Inspeksi CNAME record di prab:
+grep "outbound" /etc/bind/k02/db.k02.com
+`
+
+### 2. Perintah Demonstrasi & Verifikasi
+`ash
+# Di terminal node alpha:
+
+# 1. Resolusi CNAME dua tingkat:
+dig @192.212.1.2 outbound.k02.com
+
+# 2. Curl HTTP header:
+curl -I http://outbound.k02.com
+
+# 3. Cuplikan konten HTML dari internet:
+curl -s http://outbound.k02.com | head -n 15
+`
+
+### 3. Ekspektasi Output
+- Query mengembalikan CNAME http.badssl.com. dan IP publik 104.154.89.105.
+- Curl mengembalikan status 200 OK dari server publik 
+ginx/1.10.3 (Ubuntu).
+
+---
+
+## Soal 20: Normalisasi Koordinat DNS dan Uji Autostart (/root/init.sh)
+
+### 1. Berkas Konfigurasi & Script
+- **Normalisasi Abbey (prab)**: `/etc/bind/k02/db.k02.com` (Record: `abbey IN A 192.212.4.2`)
+- **Universal Init Script**: `/root/init.sh` di semua 14 entitas
+
+`ash
+# Cek A record abbey kembali normal di prab:
+grep "abbey" /etc/bind/k02/db.k02.com
+`
+
+### 2. Perintah Demonstrasi & Verifikasi
+`ash
+# Di terminal node alpha:
+dig @192.212.1.2 abbey.k02.com +short
+# Output wajib: 192.212.4.2
+
+# Uji eksekusi pemulihan instan di node mana saja (misal: penny / abbey / prab):
+bash /root/init.sh
+`
+
+### 3. Poin Penjelasan ke Asisten
+- **Koordinat Normal**: IP fiktif Soal 18 telah dikembalikan ke koordinat aslinya (192.212.4.2) agar seluruh arsitektur reverse proxy The Mesh berjalan normal kembali.
+- **Autostart & Resiliensi**: Seluruh service didaftarkan pada /etc/network/interfaces dan didukung skrip /root/init.sh yang menjamin sistem pulih seketika saat di-restart oleh penguji.
