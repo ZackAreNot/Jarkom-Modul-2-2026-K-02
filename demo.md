@@ -1,0 +1,580 @@
+# Panduan Demonstrasi & Verifikasi Praktikum Modul 2
+**Kelompok**: K-02  
+**IP Prefix**: `192.212.x.x`  
+**Domain**: `k02.com`  
+**Topologi**: The Mesh (14 Entitas, 5 Subnet)
+
+---
+
+## 1. Pemetaan Entitas & Subnet Jaringan
+
+| Entitas | Subnet / IP | Peran Topologi | File / Layanan Kunci |
+|---|---|---|---|
+| **rootkit** | `192.212.1.1` s.d. `5.1` | Router Sentral / Gateway | NAT WAN (`eth0`), IP Forwarding |
+| **prab** | `192.212.1.2` | Master DNS (ns1) | BIND9 Master (`k02.com`, PTR Zones) |
+| **tedd** | `192.212.1.3` | Slave DNS (ns2) | BIND9 Slave (Zone Replication) |
+| **obladi** | `192.212.1.4` | Area Vault 1 (Statis) | Apache2, Autoindex `/var/www/html/arsip/` |
+| **desmond** | `192.212.1.5` | Area Vault 2 (Statis) | Apache2, Autoindex `/var/www/html/arsip/` |
+| **oblada** | `192.212.1.6` | Area Core 1 (Dinamis) | Apache2 + PHP8.4-FPM, Rewrite `/profil` |
+| **molly** | `192.212.1.7` | Area Core 2 (Dinamis) | Apache2 + PHP8.4-FPM, Rewrite `/profil` |
+| **alpha, beta, gamma** | `192.212.2.2` s.d. `.4` | Klien Sayap Kiri | Testing & Resolver Internal |
+| **delta, epsilon** | `192.212.3.2` s.d. `.3` | Klien Sayap Kanan | Testing & Resolver Internal |
+| **abbey** | `192.212.4.2` | Gerbang Core | Nginx Reverse Proxy (Upstream Core) |
+| **penny** | `192.212.5.2` | Gerbang Vault | Apache2 Reverse Proxy (Balancer Vault) |
+
+---
+
+## 2. Alur Demonstrasi Skrip Otomasi & Pemulihan Layanan (`/root/init.sh` & `/root/setup_*.sh`)
+
+Seluruh konfigurasi jaringan, resolver DNS, dan service aplikasi telah diotomasi penuh menggunakan skrip shell (`.sh`) modular yang diletakkan pada direktori `/root/` di setiap node. Hal ini menjamin bahwa jika node di-restart oleh asisten praktikum, seluruh konfigurasi dan layanan akan pulih secara instan tanpa perlu dikonfigurasi ulang satu per satu.
+
+### A. Struktur Berkas Skrip pada Direktori `/root/`
+| Node | Berkas Skrip di `/root/` | Fungsi Utama Skrip |
+|---|---|---|
+| **Seluruh 14 Node** | `/root/init.sh` | Skrip universal: auto-detect nama host, restore interface IP, gateway, resolv.conf, & auto-start service |
+| **prab** | `/root/setup_prab.sh` | Otomasi BIND9 Master untuk zona forward `k02.com` dan reverse zones (Subnet 1, 4, 5) |
+| **tedd** | `/root/setup_tedd.sh` | Otomasi BIND9 Slave untuk replikasi seluruh zona forward dan reverse dari master |
+| **Host Non-Router** | `/root/update_resolvers.sh` | Otomasi pembaruan resolver internal: `192.212.1.2` -> `192.212.1.3` -> `192.168.122.1` |
+| **obladi & desmond** | `/root/setup_vault.sh` | Otomasi Apache2 Web Statis + direktori arsip autoindex `/arsip/` |
+| **oblada & molly** | `/root/setup_core.sh` | Otomasi Apache2 + PHP8.4-FPM + mod_rewrite Clean URL `/profil` |
+| **penny** | `/root/setup_proxy.sh` | Otomasi Apache2 Reverse Proxy & Round-Robin Load Balancer ke Area Vault |
+| **abbey** | `/root/setup_proxy.sh` | Otomasi Nginx Reverse Proxy & Round-Robin Load Balancer ke Area Core |
+
+### B. Cara Menunjukkan Skrip Otomasi Saat Sesi Demo
+1. **Menunjukkan daftar skrip otomasi yang ada di node**:
+   ```bash
+   ls -la /root/*.sh
+   ```
+2. **Menampilkan isi logika skrip otomasi ke layar terminal**:
+   ```bash
+   # Menampilkan skrip inisialisasi universal:
+   cat /root/init.sh
+
+   # Menampilkan skrip instalasi/konfigurasi layanan spesifik:
+   cat /root/setup_<nama_layanan>.sh
+   ```
+3. **Menunjukkan persistensi auto-start pada antarmuka jaringan**:
+   Tunjukkan baris `up service ...` atau `post-up ...` pada `/etc/network/interfaces`:
+   ```bash
+   cat /etc/network/interfaces
+   ```
+   *Setiap kali interface jaringan aktif saat booting, hook `up` otomatis memicu service terkait (BIND9, Apache2, Nginx, PHP-FPM, NAT) sehingga langsung berjalan di background.*
+4. **Mendemonstrasikan auto-recovery instan (Live Demo)**:
+   Jika asisten ingin menguji bagaimana node memulihkan seluruh konfigurasi dan layanan dari awal:
+   ```bash
+   bash /root/init.sh
+   ```
+   *Skrip akan secara otomatis mendeteksi nama node, menerapkan IP, gateway, resolver, dan menyalakan semua daemon service dalam 1-2 detik.*
+
+---
+
+## Soal 1: Penetapan Alamat IP & Default Gateway Seluruh Entitas
+
+### 1. Berkas Konfigurasi & Script
+- **Lokasi Script**: `/root/init.sh` pada seluruh node.
+- **Konfigurasi Interface**: `/etc/network/interfaces`
+
+```bash
+# Inspeksi konfigurasi router (rootkit):
+cat /etc/network/interfaces
+
+# Inspeksi konfigurasi host klien (alpha):
+cat /etc/network/interfaces
+cat /root/init.sh
+```
+
+### 2. Parameter Kunci Konfigurasi
+- **Node `rootkit`**:
+  - `eth0`: DHCP (terhubung ke NAT WAN `192.168.122.x/24`).
+  - `eth1` s.d. `eth5`: Static IP `192.212.1.1/24` s.d. `192.212.5.1/24`.
+- **Node Non-Router (Host)**:
+  - Alamat IP statis sesuai subnet masing-masing entitas dengan subnet mask `/24` (`255.255.255.0`).
+  - Default gateway menunjuk ke alamat IP `rootkit` pada subnet tersebut (misal: `alpha` gateway `192.212.2.1`).
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada node rootkit (memastikan seluruh interface aktif):
+ip -br a
+
+# Pada node klien (alpha):
+ip a show eth0
+ip route show
+```
+
+### 4. Ekspektasi Output
+- Interface `eth0` pada node `alpha` memiliki IP `192.212.2.2/24`.
+- Tabel perutean menampilkan:
+  ```text
+  default via 192.212.2.1 dev eth0
+  192.212.2.0/24 dev eth0 proto kernel scope link src 192.212.2.2
+  ```
+
+---
+
+## Soal 2: Konfigurasi NAT WAN Forwarding via IP
+
+### 1. Berkas Konfigurasi & Script
+- **Lokasi Script**: `/root/init.sh` di `rootkit`.
+- **Konfigurasi Interface**: `/etc/network/interfaces` di `rootkit`.
+
+```bash
+# Pada node rootkit:
+sysctl net.ipv4.ip_forward
+iptables -t nat -L -v -n
+grep -A 5 "iface eth0" /etc/network/interfaces
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Kernel IPv4 Forwarding diaktifkan: `net.ipv4.ip_forward = 1`.
+- NAT Masquerade pada interface WAN (`eth0`):
+  ```bash
+  iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+  ```
+- Persistensi dikonfigurasi pada direktif `post-up` di `/etc/network/interfaces`.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada node klien (alpha / delta):
+ping -c 3 8.8.8.8
+```
+
+### 4. Ekspektasi Output
+- Ping ke IP publik `8.8.8.8` dari node internal menerima *reply* dengan packet loss 0%:
+  ```text
+  3 packets transmitted, 3 received, 0% packet loss, time ...
+  rtt min/avg/max/mdev = ... ms
+  ```
+
+---
+
+## Soal 3: Routing Internal Antar Subnet & Initial Resolver
+
+### 1. Berkas Konfigurasi & Script
+- **Konfigurasi Resolver Awal**: `/etc/resolv.conf` di seluruh node non-router.
+- **Konfigurasi Persistensi**: `/etc/network/interfaces` dan `/root/init.sh`.
+
+```bash
+# Pada node klien (alpha):
+cat /etc/resolv.conf
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Seluruh subnet internal (`192.212.1.0/24` s.d. `192.212.5.0/24`) saling terhubung langsung melalui routing internal router `rootkit`.
+- Resolver awal disetel mengarah ke nameserver gateway NAT `192.168.122.1` tanpa menambahkan resolver publik seperti Google, sesuai instruksi awal modul.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada node klien (alpha - Subnet 2):
+# 1. Uji komunikasi internal antar subnet:
+ping -c 2 192.212.1.2    # Ke prab (Subnet 1)
+ping -c 2 192.212.4.2    # Ke abbey (Subnet 4)
+ping -c 2 192.212.5.2    # Ke penny (Subnet 5)
+
+# 2. Uji resolusi domain internet awal:
+ping -c 2 google.com
+```
+
+### 4. Ekspektasi Output
+- Seluruh ping antar subnet sukses tanpa *packet loss*.
+- Ping ke `google.com` berhasil melakukan translasi DNS via `192.168.122.1` dan merespons paket ICMP.
+
+---
+
+## Soal 4: Authoritative DNS Master (`prab`) & Slave (`tedd`) Zona `k02.com`
+
+### 1. Berkas Konfigurasi & Script
+- **Node `prab` (Master)**:
+  - Script: `/root/setup_prab.sh`
+  - Deklarasi Zona: `/etc/bind/named.conf.local`
+  - Konfigurasi Opsi: `/etc/bind/named.conf.options`
+  - Berkas Basis Data Zona: `/etc/bind/k02/db.k02.com`
+- **Node `tedd` (Slave)**:
+  - Script: `/root/setup_tedd.sh`
+  - Deklarasi Zona: `/etc/bind/named.conf.local`
+  - Replika Zona: `/var/cache/bind/db.k02.com`
+- **Node Non-Router**:
+  - Script update resolver: `/root/update_resolvers.sh`
+
+```bash
+# Inspeksi pada node prab (Master):
+cat /root/setup_prab.sh
+cat /etc/bind/named.conf.local
+cat /etc/bind/named.conf.options
+cat /etc/bind/k02/db.k02.com
+
+# Inspeksi pada node tedd (Slave):
+cat /root/setup_tedd.sh
+cat /etc/bind/named.conf.local
+ls -l /var/cache/bind/db.k02.com
+
+# Inspeksi resolver pada klien (alpha):
+cat /etc/resolv.conf
+```
+
+### 2. Parameter Kunci Konfigurasi
+- **Master (`prab`)**:
+  - `zone "k02.com"` bertipe `master`, dengan direktif `notify yes`, `also-notify { 192.212.1.3; };`, dan `allow-transfer { 192.212.1.3; };`.
+  - `forwarders { 192.168.122.1; };` pada `named.conf.options`.
+  - SOA menunjuk ke `prab.k02.com.` dan `root.k02.com.`.
+  - Record NS menunjuk ke `prab.k02.com.` dan `tedd.k02.com.`.
+  - A record apex `k02.com.` mengarah ke IP `penny` (`192.212.5.2`).
+- **Slave (`tedd`)**:
+  - `zone "k02.com"` bertipe `slave`, `file "/var/cache/bind/db.k02.com"`, dan `masters { 192.212.1.2; };`.
+- **Urutan Resolver Klien**:
+  - Urutan mutlak: `192.212.1.2` (prab) $\rightarrow$ `192.212.1.3` (tedd) $\rightarrow$ `192.168.122.1`.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# 1. Query langsung ke Master (prab):
+dig @192.212.1.2 k02.com
+
+# 2. Query langsung ke Slave (tedd):
+dig @192.212.1.3 k02.com
+
+# 3. Query domain apex dari klien (alpha):
+dig k02.com +short
+ping -c 2 k02.com
+```
+
+### 4. Ekspektasi Output
+- Bagian `flags` pada output `dig` memuat flag `aa` (*Authoritative Answer*).
+- Bagian `ANSWER SECTION` mengembalikan alamat IP `192.212.5.2` (penny).
+- Klien `alpha` dapat me-resolve dan melakukan ping langsung ke domain apex `k02.com`.
+
+---
+
+## Soal 5: Hostname System-Wide & Subdomain Entitas
+
+### 1. Berkas Konfigurasi & Script
+- **Hostname Lokal**: `/etc/hostname` dan `/etc/hosts` di semua host.
+- **Berkas Zona Master**: `/etc/bind/k02/db.k02.com` di `prab`.
+
+```bash
+# Inspeksi hostname pada node (contoh: alpha & abbey):
+hostname
+cat /etc/hostname
+
+# Inspeksi daftar A record entitas pada prab:
+grep -E "IN\s+A" /etc/bind/k02/db.k02.com
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Seluruh 14 entitas dikonfigurasi identitas hostname-nya secara *system-wide* (`/etc/hostname`).
+- Berkas zona `k02.com` memuat A record untuk masing-masing entitas:
+  - `alpha` (`192.212.2.2`), `beta` (`.3`), `gamma` (`.4`)
+  - `delta` (`192.212.3.2`), `epsilon` (`.3`)
+  - `abbey` (`192.212.4.2`), `penny` (`192.212.5.2`)
+  - `obladi` (`192.212.1.4`), `desmond` (`.5`), `oblada` (`.6`), `molly` (`.7`), `rootkit` (`.1`)
+- Serial SOA dinaikkan menjadi `2026092802`.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# 1. Verifikasi kesamaan serial SOA di Master dan Slave:
+dig @192.212.1.2 SOA k02.com +short
+dig @192.212.1.3 SOA k02.com +short
+
+# 2. Uji resolusi hostname subdomain dari klien (alpha):
+ping -c 1 alpha.k02.com
+ping -c 1 beta.k02.com
+ping -c 1 abbey.k02.com
+ping -c 1 penny.k02.com
+ping -c 1 obladi.k02.com
+ping -c 1 oblada.k02.com
+```
+
+### 4. Ekspektasi Output
+- Nilai serial SOA pada Master dan Slave sama persis (`2026092802`), membuktikan sinkronisasi replikasi berjalan.
+- Seluruh hostname subdomain entitas berhasil di-resolve ke IP target masing-masing.
+
+---
+
+## Soal 6: Round-Robin A Records untuk Vault & Core + CNAME `www` & `static`
+
+### 1. Berkas Konfigurasi & Script
+- **Berkas Zona Master**: `/etc/bind/k02/db.k02.com` di `prab`.
+
+```bash
+# Inspeksi record round-robin dan CNAME pada prab:
+grep -E "vault|core|www|static" /etc/bind/k02/db.k02.com
+```
+
+### 2. Parameter Kunci Konfigurasi
+- **Round-Robin A Records**:
+  - `vault.k02.com.` memiliki 2 A record: `192.212.1.4` (obladi) dan `192.212.1.5` (desmond).
+  - `core.k02.com.` memiliki 2 A record: `192.212.1.6` (oblada) dan `192.212.1.7` (molly).
+- **CNAME Records**:
+  - `www.k02.com.` $\rightarrow$ `penny.k02.com.`
+  - `static.k02.com.` $\rightarrow$ `abbey.k02.com.`
+- Serial SOA dinaikkan menjadi `2026092803`.
+
+### 3. Perintah Verifikasi & Validasi
+Pengujian dijalankan dari dua klien berbeda (`alpha` dan `delta`):
+
+```bash
+# Pada klien alpha (Subnet 2):
+dig vault.k02.com +short
+dig core.k02.com +short
+dig www.k02.com
+dig static.k02.com
+
+# Pada klien delta (Subnet 3):
+dig vault.k02.com +short
+dig core.k02.com +short
+dig www.k02.com +short
+dig static.k02.com +short
+```
+
+### 4. Ekspektasi Output
+- Query `vault.k02.com` mengembalikan sepasang IP: `192.212.1.4` dan `192.212.1.5`.
+- Query `core.k02.com` mengembalikan sepasang IP: `192.212.1.6` dan `192.212.1.7`.
+- Query `www.k02.com` mengembalikan CNAME `penny.k02.com.` yang meresolusi IP `192.212.5.2`.
+- Query `static.k02.com` mengembalikan CNAME `abbey.k02.com.` yang meresolusi IP `192.212.4.2`.
+- Hasil konsisten pada kedua klien.
+
+---
+
+## Soal 7: Reverse DNS Zones & PTR Records (Authoritative)
+
+### 1. Berkas Konfigurasi & Script
+- **Master (`prab`)**:
+  - `/etc/bind/named.conf.local`
+  - `/etc/bind/k02/db.192.212.1` (Subnet 1)
+  - `/etc/bind/k02/db.192.212.4` (Subnet 4)
+  - `/etc/bind/k02/db.192.212.5` (Subnet 5)
+- **Slave (`tedd`)**:
+  - `/etc/bind/named.conf.local`
+  - `/var/cache/bind/db.192.212.*`
+
+```bash
+# Inspeksi skrip otomasi konfigurasi BIND9 Master & Slave:
+cat /root/setup_prab.sh
+cat /root/setup_tedd.sh
+
+# Inspeksi deklarasi zona reverse di prab dan tedd:
+cat /etc/bind/named.conf.local
+
+# Inspeksi berkas PTR di prab:
+cat /etc/bind/k02/db.192.212.1
+cat /etc/bind/k02/db.192.212.4
+cat /etc/bind/k02/db.192.212.5
+
+# Verifikasi replikasi berkas slave pada tedd:
+ls -l /var/cache/bind/
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Zona reverse dideklarasikan untuk:
+  - `1.212.192.in-addr.arpa`: PTR untuk obladi (.4), desmond (.5), oblada (.6), molly (.7), prab (.2), tedd (.3), rootkit (.1).
+  - `4.212.192.in-addr.arpa`: PTR untuk abbey (.2), rootkit (.1).
+  - `5.212.192.in-addr.arpa`: PTR untuk penny (.2), rootkit (.1).
+- Seluruh zona ditarik oleh slave `tedd` dan menjawab query dengan status authoritative.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# 1. Query reverse authoritative langsung ke Slave (tedd):
+dig @192.212.1.3 -x 192.212.5.2    # IP penny
+dig @192.212.1.3 -x 192.212.4.2    # IP abbey
+
+# 2. Uji utilitas pencarian balik host dari klien (alpha):
+host 192.212.4.2
+host 192.212.5.2
+host 192.212.1.4
+host 192.212.1.6
+```
+
+### 4. Ekspektasi Output
+- Output `dig -x` pada `tedd` memiliki status `NOERROR` dan memuat flag `aa` (*Authoritative Answer*).
+- Hasil perintah `host`:
+  - `192.212.4.2` pointer `abbey.k02.com.`
+  - `192.212.5.2` pointer `penny.k02.com.`
+  - `192.212.1.4` pointer `obladi.k02.com.`
+  - `192.212.1.6` pointer `oblada.k02.com.`
+
+---
+
+## Soal 8: Layanan Web Statis Apache & Autoindex Direktori `/arsip/` pada Area Vault
+
+### 1. Berkas Konfigurasi & Script
+- **Lokasi Script**: `/root/setup_vault.sh` pada `obladi` dan `desmond`.
+- **Konfigurasi Autoindex**: `/etc/apache2/conf-available/arsip.conf`
+- **Konfigurasi VirtualHost**: `/etc/apache2/sites-available/000-default.conf`
+- **Direktori Berkas**: `/var/www/html/arsip/`
+
+```bash
+# Pada node obladi dan desmond:
+cat /root/setup_vault.sh
+cat /etc/apache2/conf-available/arsip.conf
+cat /etc/apache2/sites-available/000-default.conf
+ls -la /var/www/html/arsip/
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Web server menggunakan **Apache2** pada `obladi` (`192.212.1.4`) dan `desmond` (`192.212.1.5`).
+- Direktori `/var/www/html/arsip/` memuat berkas arsip tanpa adanya `index.html` default.
+- Fitur autoindex diaktifkan melalui:
+  ```apache
+  <Directory /var/www/html/arsip>
+      Options +Indexes +FollowSymLinks
+      IndexOptions FancyIndexing VersionSort NameWidth=* DescriptionWidth=* FoldersFirst
+      AllowOverride None
+      Require all granted
+  </Directory>
+  ```
+- Sesuai ketentuan soal, pengujian diwajibkan menggunakan **hostname**.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada terminal klien (alpha):
+curl -i http://obladi.k02.com/arsip/
+curl -i http://desmond.k02.com/arsip/
+curl -i http://vault.k02.com/arsip/
+```
+
+### 4. Ekspektasi Output
+- Status respon `HTTP/1.1 200 OK` dengan header `Server: Apache/2.4.68 (Debian)`.
+- Body HTML menyajikan autoindex direktori:
+  ```html
+  <title>Index of /arsip</title>
+  ...
+  <a href="arsip_obladi.txt">arsip_obladi.txt</a>
+  <a href="database_vault_backup.tar.gz">database_vault_backup.tar.gz</a>
+  <a href="dokumen_mesh.txt">dokumen_mesh.txt</a>
+  <a href="secret_data.pdf">secret_data.pdf</a>
+  ```
+
+---
+
+## Soal 9: Layanan Web Dinamis (PHP-FPM) & Clean URL `/profil` pada Area Core
+
+### 1. Berkas Konfigurasi & Script
+- **Lokasi Script**: `/root/setup_core.sh` pada `oblada` dan `molly`.
+- **Konfigurasi VirtualHost**: `/etc/apache2/sites-available/000-default.conf`
+- **Berkas Web Dinamis**:
+  - `/var/www/html/index.php` (Halaman Beranda)
+  - `/var/www/html/profil.php` (Halaman Profil)
+
+```bash
+# Pada node oblada dan molly:
+cat /root/setup_core.sh
+cat /etc/apache2/sites-available/000-default.conf
+service php8.4-fpm status
+service apache2 status
+cat /var/www/html/profil.php
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Web server menggunakan **Apache2** yang diintegrasikan dengan **PHP8.4-FPM** melalui modul `mod_proxy_fcgi` (`/run/php/php8.4-fpm.sock`).
+- Modul `mod_rewrite` diaktifkan untuk menerjemahkan URL bersih `/profil` ke berkas backend `profil.php`:
+  ```apache
+  RewriteEngine On
+  RewriteRule ^profil/?$ /profil.php [L,QSA]
+  ```
+- Akses pengujian wajib menggunakan **hostname**.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada terminal klien (alpha):
+# 1. Uji Beranda Dinamis:
+curl -i http://oblada.k02.com/
+
+# 2. Uji Clean URL /profil pada oblada:
+curl -i http://oblada.k02.com/profil
+
+# 3. Uji Clean URL /profil pada molly:
+curl -i http://molly.k02.com/profil
+
+# 4. Uji via cluster domain core.k02.com:
+curl -i http://core.k02.com/profil
+```
+
+### 4. Ekspektasi Output
+- Status respon `HTTP/1.1 200 OK` dengan header `Server: Apache/2.4.68 (Debian)`.
+- Beranda menampilkan versi engine dinamis `PHP Version: 8.4.26`.
+- Akses ke `http://oblada.k02.com/profil` (tanpa ekstensi `.php`) menampilkan profil entitas:
+  ```text
+  Identitas: OBLADA
+  Divisi: Area Core (Repositori Web Dinamis The Mesh)
+  Status Rewrite: Clean URL Aktif (/profil -> profil.php)
+  ```
+- Akses ke `http://molly.k02.com/profil` menampilkan identitas `MOLLY`.
+
+---
+
+## Soal 10: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing & Header Forwarding
+
+### 1. Berkas Konfigurasi & Script
+- **Node `penny` (Apache Proxy ke Vault)**:
+  - Script: `/root/setup_proxy.sh`
+  - Konfigurasi: `/etc/apache2/sites-available/000-default.conf`
+- **Node `abbey` (Nginx Proxy ke Core)**:
+  - Script: `/root/setup_proxy.sh`
+  - Konfigurasi: `/etc/nginx/sites-available/default`
+
+```bash
+# Inspeksi konfigurasi proxy pada penny:
+cat /root/setup_proxy.sh
+cat /etc/apache2/sites-available/000-default.conf
+
+# Inspeksi konfigurasi proxy pada abbey:
+cat /root/setup_proxy.sh
+cat /etc/nginx/sites-available/default
+```
+
+### 2. Parameter Kunci Konfigurasi
+- **Penny (Apache2 Reverse Proxy)**:
+  - Cluster balancer mengarah ke `obladi` (`192.212.1.4:80`) dan `desmond` (`192.212.1.5:80`) dengan `lbmethod=byrequests`.
+  - Meneruskan header identitas asli pengunjung:
+    ```apache
+    ProxyPreserveHost On
+    RequestHeader set X-Real-IP "expr=%{REMOTE_ADDR}"
+    ```
+- **Abbey (Nginx Reverse Proxy)**:
+  - Upstream `core_backend` mengarah ke `oblada` (`192.212.1.6:80`) dan `molly` (`192.212.1.7:80`) secara round-robin.
+  - Meneruskan header identitas asli pengunjung:
+    ```nginx
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    ```
+- **Backend Display**: Skrip `profil.php` di backend mencetak nilai header `Host` dan `X-Real-IP` yang diterima untuk verifikasi.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada terminal klien (alpha - 192.212.2.2):
+
+# 1. Uji Load Balancing Penny -> Vault (Obladi & Desmond):
+for i in 1 2 3 4; do curl -s http://penny.k02.com/ | grep "Node "; done
+
+# 2. Uji Load Balancing Abbey -> Core (Oblada & Molly):
+for i in 1 2 3 4; do curl -s http://abbey.k02.com/profil | grep Identitas; done
+
+# 3. Uji Forwarding Header Host dan X-Real-IP:
+curl -i http://abbey.k02.com/profil
+```
+
+### 4. Ekspektasi Output
+- **Load Balancing Penny**: Respon bergantian secara bergilir antara `Node DESMOND` dan `Node OBLADI`.
+- **Load Balancing Abbey**: Respon bergantian secara bergilir antara `MOLLY` dan `OBLADA`.
+- **Header Forwarding**: Respon memuat bukti penerusan IP klien dan Host:
+  ```html
+  <p>Forwarded Host: <strong>abbey.k02.com</strong></p>
+  <p>Forwarded X-Real-IP: <strong>192.212.2.2</strong></p>
+  <p>Backend Client Source IP: <strong>192.212.4.2</strong></p>
+  ```
+  *(Alamat IP asli klien Alpha `192.212.2.2` tercatat pada `X-Real-IP`, sedangkan IP perantara proxy Abbey `192.212.4.2` tercatat sebagai IP koneksi backend).*
+
+---
+
+## 2. Rangkuman Direktori Berkas Script (`/root/`)
+
+| Node | Berkas Script di `/root/` | Fungsi Utama Script |
+|---|---|---|
+| **Seluruh Node** | `/root/init.sh` | Konfigurasi IP statis, default gateway, resolv.conf, & service startup |
+| **prab** | `/root/setup_prab.sh` | Instalasi & konfigurasi BIND9 Master zona forward dan reverse |
+| **tedd** | `/root/setup_tedd.sh` | Instalasi & konfigurasi BIND9 Slave zona forward dan reverse |
+| **Host Non-Router** | `/root/update_resolvers.sh` | Konfigurasi urutan nameserver: prab -> tedd -> 192.168.122.1 |
+| **obladi** | `/root/setup_vault.sh` | Instalasi Apache2, penyusunan direktori arsip, & opsi autoindex |
+| **desmond** | `/root/setup_vault.sh` | Instalasi Apache2, penyusunan direktori arsip, & opsi autoindex |
+| **oblada** | `/root/setup_core.sh` | Instalasi Apache2 + PHP8.4-FPM, aplikasi web, & URL rewrite `/profil` |
+| **molly** | `/root/setup_core.sh` | Instalasi Apache2 + PHP8.4-FPM, aplikasi web, & URL rewrite `/profil` |
+| **penny** | `/root/setup_proxy.sh` | Instalasi Apache2 reverse proxy & load balancer ke Area Vault |
+| **abbey** | `/root/setup_proxy.sh` | Instalasi Nginx reverse proxy & load balancer ke Area Core |

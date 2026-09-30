@@ -427,7 +427,11 @@
    - Pada berkas `/etc/bind/named.conf.local` di node `tedd`, dideklarasikan ketiga zona reverse tersebut dengan `type slave`, penyimpanan berkas di `/var/cache/bind/`, dan master mengarah ke `192.212.1.2;`.
    - Service BIND9 di-reload (`rndc reload`), sehingga `tedd` secara otomatis menarik salinan zona reverse dari `prab`.
 
-3. **Verifikasi Authoritative Reverse Query**:
+3. **Otomasi Script & Persistensi Layanan**:
+   - Konfigurasi seluruh zona reverse dan forward diotomasi melalui skrip [`scripts/setup_prab.sh`](scripts/setup_prab.sh) di node `prab` dan [`scripts/setup_tedd.sh`](scripts/setup_tedd.sh) di node `tedd`.
+   - Autostart layanan BIND9 dipasang pada `/etc/network/interfaces` (`up /usr/sbin/named -u bind`) serta didaftarkan pada `/root/init.sh` di kedua server DNS untuk menjamin ketersediaan seketika pasca-reboot.
+
+4. **Verifikasi Authoritative Reverse Query**:
    - Query pencarian balik (*reverse lookup*) dilakukan terhadap alamat IP masing-masing entitas untuk memastikan server mengembalikan nama domain yang tepat dan bendera `aa` (*Authoritative Answer*) aktif.
 
 ### Bukti dan Hasil
