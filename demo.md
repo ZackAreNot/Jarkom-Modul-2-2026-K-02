@@ -243,7 +243,7 @@ ping -c 2 k02.com
 
 ---
 
-## Soal 5: Hostname System-Wide & Subdomain Entitas
+## Soal 5: Hostname System-Wide & Subdomain Setiap Node
 
 ### 1. Berkas Konfigurasi & Script
 - **Hostname Lokal**: `/etc/hostname` dan `/etc/hosts` di semua host.
@@ -253,6 +253,9 @@ ping -c 2 k02.com
 # Inspeksi hostname pada node (contoh: alpha & abbey):
 hostname
 cat /etc/hostname
+
+# Inspeksi skrip otomasi BIND9 Master:
+cat /root/setup_prab.sh
 
 # Inspeksi daftar A record entitas pada prab:
 grep -E "IN\s+A" /etc/bind/k02/db.k02.com
@@ -265,15 +268,10 @@ grep -E "IN\s+A" /etc/bind/k02/db.k02.com
   - `delta` (`192.212.3.2`), `epsilon` (`.3`)
   - `abbey` (`192.212.4.2`), `penny` (`192.212.5.2`)
   - `obladi` (`192.212.1.4`), `desmond` (`.5`), `oblada` (`.6`), `molly` (`.7`), `rootkit` (`.1`)
-- Serial SOA dinaikkan menjadi `2026092802`.
 
 ### 3. Perintah Verifikasi & Validasi
 ```bash
-# 1. Verifikasi kesamaan serial SOA di Master dan Slave:
-dig @192.212.1.2 SOA k02.com +short
-dig @192.212.1.3 SOA k02.com +short
-
-# 2. Uji resolusi hostname subdomain dari klien (alpha):
+# Pada terminal klien (alpha / beta):
 ping -c 1 alpha.k02.com
 ping -c 1 beta.k02.com
 ping -c 1 abbey.k02.com
@@ -283,12 +281,48 @@ ping -c 1 oblada.k02.com
 ```
 
 ### 4. Ekspektasi Output
-- Nilai serial SOA pada Master dan Slave sama persis (`2026092802`), membuktikan sinkronisasi replikasi berjalan.
-- Seluruh hostname subdomain entitas berhasil di-resolve ke IP target masing-masing.
+- Seluruh hostname subdomain entitas berhasil di-resolve ke IP target masing-masing dengan 0% packet loss.
 
 ---
 
-## Soal 6: Round-Robin A Records untuk Vault & Core + CNAME `www` & `static`
+## Soal 6: Sinkronisasi Replikasi Zone Transfer & Kesamaan Serial SOA Master (Prab) dan Slave (Tedd)
+
+### 1. Berkas Konfigurasi & Script
+- **Master (`prab`)**: `/etc/bind/k02/db.k02.com` dan `/root/setup_prab.sh`
+- **Slave (`tedd`)**: `/var/cache/bind/db.k02.com` dan `/root/setup_tedd.sh`
+
+```bash
+# Inspeksi skrip otomasi konfigurasi BIND9 Master & Slave:
+cat /root/setup_prab.sh
+cat /root/setup_tedd.sh
+
+# Periksa status daemon named:
+service named status
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Pada node `prab`, zona `k02.com` dikonfigurasikan dengan `notify yes;`, `also-notify { 192.212.1.3; };`, dan `allow-transfer { 192.212.1.3; };`.
+- Pada node `tedd`, zona `k02.com` dikonfigurasikan sebagai `type slave;` yang menarik salinan zona dari master `192.212.1.2`.
+- Nilai serial SOA pada Master dan Slave harus identik (sama persis), membuktikan replikasi berlangsung sukses tanpa desinkronisasi.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Query serial SOA langsung ke Master (prab):
+dig @192.212.1.2 SOA k02.com +short
+
+# Query serial SOA langsung ke Slave (tedd):
+dig @192.212.1.3 SOA k02.com +short
+```
+
+### 4. Ekspektasi Output
+- Output serial SOA pada Master (`prab`) dan Slave (`tedd`) bernilai sama persis:
+  ```text
+  prab.k02.com. root.k02.com. 2026092803 604800 86400 2419200 604800
+  ```
+
+---
+
+## Soal 7: Round-Robin A Records untuk Vault & Core + CNAME `www` & `static`
 
 ### 1. Berkas Konfigurasi & Script
 - **Berkas Zona Master**: `/etc/bind/k02/db.k02.com` di `prab`.
@@ -303,8 +337,8 @@ grep -E "vault|core|www|static" /etc/bind/k02/db.k02.com
   - `vault.k02.com.` memiliki 2 A record: `192.212.1.4` (obladi) dan `192.212.1.5` (desmond).
   - `core.k02.com.` memiliki 2 A record: `192.212.1.6` (oblada) dan `192.212.1.7` (molly).
 - **CNAME Records**:
-  - `www.k02.com.` $\rightarrow$ `penny.k02.com.`
-  - `static.k02.com.` $\rightarrow$ `abbey.k02.com.`
+  - `www.k02.com.` $ightarrow$ `penny.k02.com.`
+  - `static.k02.com.` $ightarrow$ `abbey.k02.com.`
 - Serial SOA dinaikkan menjadi `2026092803`.
 
 ### 3. Perintah Verifikasi & Validasi
@@ -333,7 +367,7 @@ dig static.k02.com +short
 
 ---
 
-## Soal 7: Reverse DNS Zones & PTR Records (Authoritative)
+## Soal 8: Reverse DNS Zones & PTR Records (Authoritative)
 
 ### 1. Berkas Konfigurasi & Script
 - **Master (`prab`)**:
@@ -375,7 +409,7 @@ ls -l /var/cache/bind/
 dig @192.212.1.3 -x 192.212.5.2    # IP penny
 dig @192.212.1.3 -x 192.212.4.2    # IP abbey
 
-# 2. Uji utilitas pencarian balik host dari klien (alpha):
+# 2. Uji utilitas pencarian balik host dari klien (alpha / beta):
 host 192.212.4.2
 host 192.212.5.2
 host 192.212.1.4
@@ -392,7 +426,7 @@ host 192.212.1.6
 
 ---
 
-## Soal 8: Layanan Web Statis Apache & Autoindex Direktori `/arsip/` pada Area Vault
+## Soal 9: Layanan Web Statis Apache & Autoindex Direktori `/arsip/` pada Area Vault
 
 ### 1. Berkas Konfigurasi & Script
 - **Lokasi Script**: `/root/setup_vault.sh` pada `obladi` dan `desmond`.
@@ -424,7 +458,7 @@ ls -la /var/www/html/arsip/
 
 ### 3. Perintah Verifikasi & Validasi
 ```bash
-# Pada terminal klien (alpha):
+# Pada terminal klien (alpha / beta):
 curl -i http://obladi.k02.com/arsip/
 curl -i http://desmond.k02.com/arsip/
 curl -i http://vault.k02.com/arsip/
@@ -444,7 +478,7 @@ curl -i http://vault.k02.com/arsip/
 
 ---
 
-## Soal 9: Layanan Web Dinamis (PHP-FPM) & Clean URL `/profil` pada Area Core
+## Soal 10: Layanan Web Dinamis (PHP-FPM) & Clean URL `/profil` pada Area Core
 
 ### 1. Berkas Konfigurasi & Script
 - **Lokasi Script**: `/root/setup_core.sh` pada `oblada` dan `molly`.
@@ -473,7 +507,7 @@ cat /var/www/html/profil.php
 
 ### 3. Perintah Verifikasi & Validasi
 ```bash
-# Pada terminal klien (alpha):
+# Pada terminal klien (alpha / beta):
 # 1. Uji Beranda Dinamis:
 curl -i http://oblada.k02.com/
 
@@ -500,7 +534,7 @@ curl -i http://core.k02.com/profil
 
 ---
 
-## Soal 10: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing & Header Forwarding
+## Soal 11: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing & Header Forwarding
 
 ### 1. Berkas Konfigurasi & Script
 - **Node `penny` (Apache Proxy ke Vault)**:
@@ -539,7 +573,7 @@ cat /etc/nginx/sites-available/default
 
 ### 3. Perintah Verifikasi & Validasi
 ```bash
-# Pada terminal klien (alpha - 192.212.2.2):
+# Pada terminal klien (alpha / beta):
 
 # 1. Uji Load Balancing Penny -> Vault (Obladi & Desmond):
 for i in 1 2 3 4; do curl -s http://penny.k02.com/ | grep "Node "; done
@@ -552,29 +586,82 @@ curl -i http://abbey.k02.com/profil
 ```
 
 ### 4. Ekspektasi Output
-- **Load Balancing Penny**: Respon bergantian secara bergilir antara `Node DESMOND` dan `Node OBLADI`.
-- **Load Balancing Abbey**: Respon bergantian secara bergilir antara `MOLLY` dan `OBLADA`.
+- **Load Balancing Penny**: Respon bergantian secara bergilir (*round-robin*) antara `Node DESMOND` dan `Node OBLADI`.
+- **Load Balancing Abbey**: Respon bergantian secara bergilir (*round-robin*) antara `MOLLY` dan `OBLADA`.
 - **Header Forwarding**: Respon memuat bukti penerusan IP klien dan Host:
   ```html
   <p>Forwarded Host: <strong>abbey.k02.com</strong></p>
   <p>Forwarded X-Real-IP: <strong>192.212.2.2</strong></p>
   <p>Backend Client Source IP: <strong>192.212.4.2</strong></p>
   ```
-  *(Alamat IP asli klien Alpha `192.212.2.2` tercatat pada `X-Real-IP`, sedangkan IP perantara proxy Abbey `192.212.4.2` tercatat sebagai IP koneksi backend).*
 
 ---
 
-## 2. Rangkuman Direktori Berkas Script (`/root/`)
+## Soal 12: Perlindungan Basic Authentication untuk Path `/admin` di Penny
 
-| Node | Berkas Script di `/root/` | Fungsi Utama Script |
-|---|---|---|
-| **Seluruh Node** | `/root/init.sh` | Konfigurasi IP statis, default gateway, resolv.conf, & service startup |
-| **prab** | `/root/setup_prab.sh` | Instalasi & konfigurasi BIND9 Master zona forward dan reverse |
-| **tedd** | `/root/setup_tedd.sh` | Instalasi & konfigurasi BIND9 Slave zona forward dan reverse |
-| **Host Non-Router** | `/root/update_resolvers.sh` | Konfigurasi urutan nameserver: prab -> tedd -> 192.168.122.1 |
-| **obladi** | `/root/setup_vault.sh` | Instalasi Apache2, penyusunan direktori arsip, & opsi autoindex |
-| **desmond** | `/root/setup_vault.sh` | Instalasi Apache2, penyusunan direktori arsip, & opsi autoindex |
-| **oblada** | `/root/setup_core.sh` | Instalasi Apache2 + PHP8.4-FPM, aplikasi web, & URL rewrite `/profil` |
-| **molly** | `/root/setup_core.sh` | Instalasi Apache2 + PHP8.4-FPM, aplikasi web, & URL rewrite `/profil` |
-| **penny** | `/root/setup_proxy.sh` | Instalasi Apache2 reverse proxy & load balancer ke Area Vault |
-| **abbey** | `/root/setup_proxy.sh` | Instalasi Nginx reverse proxy & load balancer ke Area Core |
+### 1. Berkas Konfigurasi & Script
+- **Target Node**: `penny` (Apache2 Web Server)
+- **Berkas Kredensial**: `/etc/apache2/.htpasswd`
+- **Konfigurasi VirtualHost**: `/etc/apache2/sites-available/000-default.conf`
+- **Dokumen Rahasia**: `/var/www/html/admin/index.html`
+
+```bash
+# Pada node penny:
+cat /etc/apache2/.htpasswd
+grep -A 10 "<Directory /var/www/html/admin>" /etc/apache2/sites-available/000-default.conf
+cat /var/www/html/admin/index.html
+```
+
+### 2. Parameter Kunci Konfigurasi
+- Direktori `/var/www/html/admin/` dilindungi autentikasi dasar HTTP (`mod_auth_basic`).
+- Path `/admin` dikecualikan dari `ProxyPass` (`ProxyPass /admin !`) agar diproses lokal di `penny`.
+- Kredensial pengguna:
+  - Username: `prabs`
+  - Password: `pakar_pinter_jadi_goblok` (atau `pakar_pinter_jadi_gob***`)
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada terminal klien (alpha / beta):
+
+# 1. Akses tanpa kredensial (Wajib 401 Unauthorized):
+curl -i http://penny.k02.com/admin
+
+# 2. Akses dengan password salah (Wajib 401 Unauthorized):
+curl -i -u prabs:salah http://penny.k02.com/admin
+
+# 3. Akses dengan kredensial benar (Wajib 200 OK):
+curl -i -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin
+```
+
+### 4. Ekspektasi Output
+- Request tanpa kredensial / password salah menghasilkan status `HTTP/1.1 401 Unauthorized` dengan header `WWW-Authenticate: Basic realm=...`.
+- Request dengan kredensial benar menghasilkan status `HTTP/1.1 200 OK` dan menampilkan isi dokumen rahasia sindikat.
+
+---
+
+## Soal 13: Canonical Redirect Permanen 301 (Penny) & Sementara 302 (Abbey)
+
+### 1. Berkas Konfigurasi & Script
+- **Node `penny`**: `/etc/apache2/sites-available/000-default.conf`
+- **Node `abbey`**: `/etc/nginx/sites-available/default`
+
+### 2. Parameter Kunci Konfigurasi
+- **Penny (Apache2)**: Akses ke alamat IP `192.212.5.2` atau domain non-kanonik `penny.k02.com` dipaksa redirect permanen (**Status Code 301**) menuju `http://www.k02.com/`.
+- **Abbey (Nginx)**: Akses ke alamat IP `192.212.4.2` atau domain non-kanonik `abbey.k02.com` dipaksa redirect sementara (**Status Code 302**) menuju `http://static.k02.com/`.
+
+### 3. Perintah Verifikasi & Validasi
+```bash
+# Pada terminal klien (alpha / beta):
+
+# 1. Uji redirect Penny (301 Permanent):
+curl -i http://192.212.5.2/
+curl -i http://penny.k02.com/
+
+# 2. Uji redirect Abbey (302 Found / Temporary):
+curl -i http://192.212.4.2/
+curl -i http://abbey.k02.com/
+```
+
+### 4. Ekspektasi Output
+- Curl ke Penny mengembalikan header `HTTP/1.1 301 Moved Permanently` dengan `Location: http://www.k02.com/`.
+- Curl ke Abbey mengembalikan header `HTTP/1.1 302 Moved Temporarily` (atau `302 Found`) dengan `Location: http://static.k02.com/`.

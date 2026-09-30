@@ -303,7 +303,6 @@
 
 ### Soal
 > "Entitas tanpa identitas adalah anomali," pesan Rootkit. Namai semua Entitas (hostname) sesuai glosarium: rootkit, alpha, beta, gamma, delta, epsilon, prab, tedd, abbey, penny, obladi, desmond, oblada, molly, dan verifikasi bahwa setiap host mengenali hostname tersebut secara system-wide. Buat setiap domain untuk masing-masing node sesuai dengan namanya (contoh: alpha.<xxxx>.com) dan assign IP masing-masing juga. Lakukan pengecualian untuk node yang bertanggung jawab atas prab dan tedd.
-> Pastikan zone transfer berjalan, pastikan tedd telah menerima salinan zona terbaru dari prab. Nilai serial SOA di keduanya harus sama karena keduanya tidak bisa dipisahkan dan saling melengkapi.
 
 ### Langkah Pengerjaan
 
@@ -327,29 +326,47 @@
      - `molly.k02.com.` $\rightarrow$ `192.212.1.7`
      *(Catatan: `prab.k02.com` dan `tedd.k02.com` telah dikonfigurasi sebelumnya pada Soal 4).*
 
-3. **Penaikan Nilai Serial SOA dan Mekanisme Zone Transfer ke `tedd`**:
-   - Serial pada record SOA master dinaikkan dari `2026092801` menjadi `2026092802`.
-   - Perintah `rndc reload` dieksekusi pada `prab`, memicu pengiriman pesan NOTIFY secara otomatis ke slave `tedd` (`192.212.1.3`).
-   - Server `tedd` merespons dengan melakukan transfer zona (IXFR/AXFR) dan memperbarui basis data lokalnya di `/var/cache/bind/db.k02.com`.
-   - Integritas transfer diverifikasi dengan mencocokkan nomor serial SOA pada kedua server, memastikan keduanya bernilai sama (`2026092802`).
-
 ### Bukti dan Hasil
 
 1. **Verifikasi Hostname System-Wide pada Node**:
    ![Verifikasi Hostname System-Wide](Screenshot/soal-5/hostname-verification.png)
    *Pemeriksaan perintah `hostname` dan `/etc/hostname` pada node membuktikan seluruh host telah mengenali identitas nama mereka masing-masing secara system-wide.*
 
-2. **Verifikasi Kesamaan Nilai Serial SOA (`prab` vs `tedd`)**:
-   ![Verifikasi Serial SOA](Screenshot/soal-5/soa-serial-match.png)
-   *Pengujian query SOA pada master `prab` (`dig @192.212.1.2 k02.com SOA`) dan slave `tedd` (`dig @192.212.1.3 k02.com SOA`) membuktikan bahwa kedua server telah tersinkronisasi sempurna dengan nilai serial SOA yang identik: `2026092802`.*
-
-3. **Verifikasi Resolusi Nama Subdomain Entitas dari Klien**:
+2. **Verifikasi Resolusi Nama Subdomain Entitas dari Klien**:
    ![Uji Resolusi Subdomain](Screenshot/soal-5/ping-subdomains.png)
    *Pengujian ping dari klien `alpha` menuju subdomain entitas lintas kelompok (`delta.k02.com`, `abbey.k02.com`, dan `obladi.k02.com`) berhasil ter-resolve ke IP yang tepat dan berkomunikasi lancar dengan 0% packet loss.*
 
 ---
 
 ## Soal 6
+
+>Dikerjakan Oleh Zaki
+
+### Soal
+> Pastikan zone transfer berjalan, pastikan tedd telah menerima salinan zona terbaru dari prab. Nilai serial SOA di keduanya harus sama karena keduanya tidak bisa dipisahkan dan saling melengkapi.
+
+### Langkah Pengerjaan
+
+1. **Penaikan Nilai Serial SOA pada Master `prab`**:
+   - Setiap kali terjadi penambahan atau perubahan record pada berkas zona `/etc/bind/k02/db.k02.com`, nomor serial pada record SOA master dinaikkan (misalnya dari `2026092801` menjadi `2026092802` / `2026092803`).
+
+2. **Mekanisme Replikasi Otomatis (Zone Transfer IXFR/AXFR)**:
+   - Perintah reload zona (`rndc reload` atau restart service) dieksekusi pada master `prab`.
+   - Fitur `notify yes;` dan `also-notify { 192.212.1.3; };` pada `named.conf.local` master secara otomatis mengirimkan notifikasi NOTIFY ke slave `tedd`.
+   - Server `tedd` (`192.212.1.3`) merespons dengan meminta transfer zona (AXFR/IXFR) dan menyimpan salinan basis data terbaru ke berkas `/var/cache/bind/db.k02.com`.
+
+3. **Verifikasi Integritas Serial SOA**:
+   - Query record SOA dijalankan secara independen ke masing-masing server (`dig @192.212.1.2 SOA k02.com` dan `dig @192.212.1.3 SOA k02.com`).
+   - Nilai serial pada kedua server dipastikan identik untuk membuktikan sinkronisasi berjalan tanpa kesalahan.
+
+### Bukti dan Hasil
+
+1. **Verifikasi Kesamaan Nilai Serial SOA (`prab` vs `tedd`)**:
+   ![Verifikasi Serial SOA](Screenshot/soal-5/soa-serial-match.png)
+   *Pengujian query SOA pada master `prab` (`dig @192.212.1.2 k02.com SOA`) dan slave `tedd` (`dig @192.212.1.3 k02.com SOA`) membuktikan bahwa kedua server telah tersinkronisasi sempurna dengan nilai serial SOA yang identik: `2026092803`.*
+
+---
+## Soal 7
 
 >Dikerjakan Oleh Zaki
 
@@ -403,7 +420,7 @@
 
 ---
 
-## Soal 7
+## Soal 8
 
 >Dikerjakan Oleh Zaki
 
@@ -451,7 +468,7 @@
 
 ---
 
-## Soal 8: Layanan Web Statis Apache & Autoindex Direktori `/arsip/` pada Area Vault
+## Soal 9: Layanan Web Statis Apache & Autoindex Direktori `/arsip/` pada Area Vault
 
 ### Deskripsi Soal
 > Jalankan layanan web statis pada hostname di node area vault (menggunakan apache). Buka folder direktori `/arsip/` dan aktifkan fitur autoindex (directory listing) pada konfigurasi Apache sehingga seluruh daftar file di dalamnya dapat ditelusuri langsung dari browser. Akses pengujian harus dilakukan melalui hostname, bukan IP address.
@@ -517,7 +534,7 @@ Pengujian dilakukan dari klien **`alpha`** dengan memanggil URL melalui **hostna
 
 ---
 
-## Soal 9: Layanan Web Dinamis (PHP-FPM) & URL Rewrite Bersih `/profil` pada Area Core
+## Soal 10: Layanan Web Dinamis (PHP-FPM) & URL Rewrite Bersih `/profil` pada Area Core
 
 ### Deskripsi Soal
 > Jalankan layanan web dinamis (PHP-FPM) pada hostname di node core (menggunakan apache). Buat sebuah aplikasi sederhana yang memuat halaman beranda dan halaman profil. Terapkan aturan rewrite pada server sehingga akses ke /profil dapat berfungsi dengan URL bersih (tanpa akhiran .php). Akses pengujian wajib dilakukan melalui hostname.
@@ -589,7 +606,7 @@ Pengujian dilakukan dari klien **`alpha`** dengan memanggil URL melalui **hostna
 
 ---
 
-## Soal 10: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing dan Header Forwarding
+## Soal 11: Reverse Proxy Penny (Apache) & Abbey (Nginx) dengan Load Balancing dan Header Forwarding
 
 ### Deskripsi Soal
 > Konfigurasikan Penny (menggunakan Apache) sebagai reverse proxy yang mengarah ke semua node di area vault (Obladi & Desmond). Sementara itu, konfigurasikan Abbey (menggunakan Nginx) sebagai reverse proxy menuju area core (Oblada & Molly). Pastikan kedua gerbang ini meneruskan identitas asli pengunjung ke server backend dengan melakukan forwarding header Host dan X-Real-IP. Buktikan bahwa Penny dan Abbey berhasil mendistribusikan lalu lintas dengan tepat.
