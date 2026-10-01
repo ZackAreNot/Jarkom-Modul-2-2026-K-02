@@ -722,25 +722,25 @@ Pengujian dilakukan dari node klien **`alpha`** (`192.212.2.2`):
 
 2. **Instalasi Utilitas dan Pembuatan Kredensial Pengguna**:
    - Paket utilitas `apache2-utils` diinstal pada node `penny` untuk menyediakan perintah `htpasswd`:
-     `ash
+     ```bash
      apt-get update
      apt-get install -y apache2-utils
-     `
+     ```
    - Berkas kredensial `/etc/apache2/.htpasswd` dibuat dengan password tanpa sensor `pakar_pinter_jadi_goblok`:
-     `ash
+     ```bash
      htpasswd -bc /etc/apache2/.htpasswd prabs pakar_pinter_jadi_goblok
-     `
+     ```
 
 3. **Penyusunan Dokumen Rahasia Sindikat**:
    - Direktori khusus `/var/www/html/admin` dibentuk dan diisi berkas rahasia:
-     `ash
+     ```bash
      mkdir -p /var/www/html/admin
      echo "<h1>DOKUMEN RAHASIA SINDIKAT THE MESH</h1><p>Akses diizinkan untuk agen prabs.</p>" > /var/www/html/admin/index.html
-     `
+     ```
 
 4. **Konfigurasi Proteksi Basic Authentication pada Apache**:
    - Pada berkas VirtualHost `/etc/apache2/sites-available/000-default.conf`, direktif proteksi dipetakan menggunakan blok `<Directory>` dan pengecualian proxy:
-     `pache
+     ```pache
      # 1. Pengecualian proxy dan pemetaan alias lokal
      ProxyPass /admin !
      Alias /admin /var/www/html/admin
@@ -754,7 +754,7 @@ Pengujian dilakukan dari node klien **`alpha`** (`192.212.2.2`):
          Options Indexes FollowSymLinks
          AllowOverride None
      </Directory>
-     `
+     ```
    - Sintaks konfigurasi diverifikasi dengan `apache2ctl configtest` dan layanan Apache direstart (`service apache2 restart`).
 
 5. **Otomasi Script & Persistensi**:
@@ -797,7 +797,7 @@ Pengujian dilakukan dari klien **`alpha`** (`192.212.2.2`) menggunakan `curl`:
 
 2. **Konfigurasi Redirect Permanen 301 pada Penny (Apache2)**:
    - Modul mod_rewrite digunakan di dalam VirtualHost /etc/apache2/sites-available/000-default.conf di node penny:
-     `pache
+     ```pache
      RewriteEngine On
      # Pengecualian path /admin agar dokumen rahasia sindikat tetap dapat diakses
      RewriteCond %{REQUEST_URI} !^/admin
@@ -805,13 +805,13 @@ Pengujian dilakukan dari klien **`alpha`** (`192.212.2.2`) menggunakan `curl`:
      RewriteCond %{HTTP_HOST} ^penny\.k02\.com$ [NC,OR]
      RewriteCond %{HTTP_HOST} ^192\.212\.5\.2$ [NC]
      RewriteRule ^(.*)$ http://www.k02.com [R=301,L]
-     `
+     ```
    - Dengan aturan ini, seluruh request menuju IP atau hostname non-kanonik penny.k02.com akan dialihkan secara permanen dengan header respon HTTP/1.1 301 Moved Permanently dan Location: http://www.k02.com/.
 
 3. **Konfigurasi Redirect Sementara 302 pada Abbey (Nginx)**:
    - Pada berkas konfigurasi /etc/nginx/sites-available/default di node bbey, diterapkan dua blok server:
      - **Blok 1 (Catch non-kanonik & IP)**: Menangkap akses ke bbey.k02.com, 192.212.4.2, serta default server, lalu me-redirect sementara:
-       `
+       ```
 ginx
        server {
            listen 80 default_server;
@@ -820,9 +820,9 @@ ginx
 
            return 302 http://static.k02.com;
        }
-       `
+       ```
      - **Blok 2 (Host kanonik static.k02.com)**: Melayani reverse proxy menuju cluster core_backend (oblada dan molly):
-       `
+       ```
 ginx
        server {
            listen 80;
@@ -837,7 +837,7 @@ ginx
                proxy_set_header X-Forwarded-Proto ;
            }
        }
-       `
+       ```
 
 4. **Otomasi Script & Persistensi**:
    - Logika konfigurasi redirect permanen 301 diintegrasikan ke [scripts/setup_proxy_penny.sh](scripts/setup_proxy_penny.sh) dan redirect sementara 302 diintegrasikan ke [scripts/setup_proxy_abbey.sh](scripts/setup_proxy_abbey.sh).
@@ -883,33 +883,35 @@ Pengujian dilakukan dari klien **lpha** (Subnet 2) menggunakan curl:
    - Solusinya adalah memanfaatkan header X-Real-IP yang telah diteruskan oleh gerbang pada Soal 11, kemudian mengonfigurasi backend web server untuk mengekstrak dan mencatat IP tersebut ke dalam log akses.
 
 2. **Implementasi pada Area Vault (Apache2 - Node obladi & desmond)**:
-   - Modul emoteip diaktifkan pada kedua node:
-     `ash
+   - Modul 
+emoteip diaktifkan pada kedua node:
+     ```bash
      a2enmod remoteip
-     `
+     ```
    - Berkas konfigurasi /etc/apache2/conf-available/remoteip.conf dibuat untuk menetapkan header dan mendaftarkan gerbang proxy terpercaya:
-     `pache
+     ```pache
      RemoteIPHeader X-Real-IP
      RemoteIPInternalProxy 192.212.5.2
      RemoteIPInternalProxy 192.212.4.2
-     `
+     ```
      Konfigurasi diaktifkan dengan 2enconf remoteip.
-   - Format pencatatan log pada /etc/apache2/apache2.conf diubah dari %h (IP koneksi langsung) menjadi %a (IP asli klien yang telah di-resolve oleh modul emoteip):
-     `ash
+   - Format pencatatan log pada /etc/apache2/apache2.conf diubah dari %h (IP koneksi langsung) menjadi %a (IP asli klien yang telah di-resolve oleh modul 
+emoteip):
+     ```bash
      sed -i 's/%h /%a /g' /etc/apache2/apache2.conf
-     `
+     ```
    - Layanan Apache direstart (service apache2 restart).
 
 3. **Implementasi pada Area Core (Nginx - Node oblada & molly)**:
    - Modul 
 gx_http_realip_module pada Nginx dikonfigurasi melalui berkas /etc/nginx/conf.d/realip.conf:
-     `
+     ```
 ginx
      set_real_ip_from 192.212.4.2;
      set_real_ip_from 192.212.5.2;
      real_ip_header X-Real-IP;
      real_ip_recursive on;
-     `
+     ```
    - Dengan direktif ini, variabel $remote_addr pada Nginx secara otomatis digantikan dengan nilai header X-Real-IP yang dikirimkan oleh Abbey (192.212.4.2), sehingga format log default Nginx langsung mencatat IP asli klien.
    - Layanan Nginx direstart (service nginx restart).
 
@@ -942,7 +944,7 @@ Pengujian dilakukan dari klien **lpha** (192.212.2.2):
    - Paket `php8.4-fpm` dan modul FastCGI `proxy_fcgi` diaktifkan pada node `penny`.
    - Direktori `/var/www/eternal` dibuat dan diisi skrip `index.php` yang memuat fungsi-fungsi dinamis PHP (`phpversion()`, `date()`, kalkulasi matematika).
    - Pada berkas `/etc/apache2/sites-available/000-default.conf`, jalur `/eternal` dikecualikan dari `ProxyPass` (`ProxyPass /eternal !`), dialiaskan ke `/var/www/eternal`, dan dikonfigurasi pemroses FastCGI PHP-FPM:
-     `pache
+     ```pache
      ProxyPass /eternal !
      Alias /eternal /var/www/eternal
      <Directory /var/www/eternal>
@@ -955,19 +957,19 @@ Pengujian dilakukan dari klien **lpha** (192.212.2.2):
              SetHandler "proxy:unix:/run/php/php8.4-fpm.sock|fcgi://localhost"
          </FilesMatch>
      </Directory>
-     `
+     ```
    - Layanan Apache direstart (`service apache2 restart`).
 
 2. **Jalur Khusus `/orion` pada Abbey (Nginx Murni Statis)**:
    - Direktori `/var/www/orion` dibuat dan diisi dokumen web statis `index.html` serta file uji coba `test.php` untuk membuktikan server tidak melakukan eksekusi PHP.
    - Pada berkas konfigurasi `/etc/nginx/sites-available/default` di host kanonik `static.k02.com`, dipetakan blok lokasi khusus:
-     `
+     ```
 ginx
      location /orion {
          alias /var/www/orion;
          index index.html;
      }
-     `
+     ```
    - Karena blok lokasi ini tidak menyertakan modul `fastcgi_pass`, seluruh berkas di dalamnya disajikan secara murni statis langsung oleh Nginx tanpa eksekusi engine PHP.
    - Layanan Nginx direstart (`service nginx restart`).
 
@@ -1005,13 +1007,13 @@ Pengujian dilakukan dari klien **`alpha`**:
 
 2. **Eksekusi Pengujian Beban dari Klien `alpha`**:
    - **Titik Akhir 1: `http://www.k02.com/` (Gerbang Penny -> Area Vault)**:
-     `ash
+     ```bash
      ab -n 250 -c 10 http://www.k02.com/
-     `
+     ```
    - **Titik Akhir 2: `http://static.k02.com/` (Gerbang Abbey -> Area Core)**:
-     `ash
+     ```bash
      ab -n 250 -c 10 http://static.k02.com/
-     `
+     ```
 
 ### Bukti dan Rangkuman Hasil Pengujian
 
@@ -1055,18 +1057,18 @@ Pengujian dilakukan dari klien **`alpha`**:
 
 2. **Konfigurasi Berkas Zona pada DNS Master (`prab` - `192.212.1.2`)**:
    - Berkas zona forward `/etc/bind/k02/db.k02.com` ditambahkan 5 entri TXT record:
-     `zone
+     ```zone
      alpha   IN      TXT     "alpha"
      beta    IN      TXT     "beta"
      gamma   IN      TXT     "gamma"
      delta   IN      TXT     "delta"
      epsilon IN      TXT     "epsilon"
-     `
+     ```
    - Nomor serial SOA dinaikkan menjadi `2026092805` untuk menjamin integritas sinkronisasi ke slave `tedd`.
    - Validasi sintaks berkas basis data zona dilakukan menggunakan perintah:
-     `ash
+     ```bash
      named-checkzone k02.com /etc/bind/k02/db.k02.com
-     `
+     ```
    - Layanan BIND9 dimuat ulang dengan `rndc reload` atau `service named restart`.
 
 3. **Otomasi Script & Sinkronisasi**:
@@ -1083,11 +1085,11 @@ Pengujian dilakukan dari klien **`alpha`**:
 2. **Bukti Query TXT Record dari Klien (`alpha`)**:
    ![Uji Query TXT Alpha](Screenshot/soal-17/txt-query-alpha.png)
    - Perintah query:
-     `ash
+     ```bash
      dig @192.212.1.2 alpha.k02.com TXT +short
      dig @192.212.1.2 beta.k02.com TXT +short
      dig @192.212.1.2 delta.k02.com TXT +short
-     `
+     ```
    - Server mengembalikan respon teks hostname yang sesuai secara persis: `"alpha"`, `"beta"`, dan `"delta"`.
 
 ---
@@ -1107,9 +1109,9 @@ Pengujian dilakukan dari klien **`alpha`**:
 
 2. **Rekayasa Konfigurasi Record pada Master `prab`**:
    - Record A `abbey.k02.com` diubah ke IP fiktif `10.99.99.1` dengan deklarasi TTL 15 detik:
-     `zone
+     ```zone
      abbey   15      IN      A       10.99.99.1
-     `
+     ```
    - Serial SOA dinaikkan menjadi `2026092806` untuk memicu notifikasi replikasi ke slave `tedd`.
    - Layanan BIND9 dimuat ulang dengan `rndc reload` dan `service named restart`.
 
@@ -1156,9 +1158,9 @@ Pengujian dilakukan dari klien **`alpha`**:
 
 2. **Konfigurasi Berkas Zona pada Master `prab` (`192.212.1.2`)**:
    - Record CNAME didaftarkan pada berkas zona forward `/etc/bind/k02/db.k02.com`:
-     `zone
+     ```zone
      outbound    IN    CNAME    http.badssl.com.
-     `
+     ```
    - Serial SOA dinaikkan menjadi `2026092807` dan BIND9 dimuat ulang dengan `rndc reload` dan `service named restart`.
 
 3. **Verifikasi Jalur Akses WAN / NAT**:
@@ -1199,16 +1201,16 @@ Pengujian dilakukan dari klien **`alpha`**:
 
 1. **Normalisasi Koordinat Rekayasa DNS Abbey (Pengembalian dari Soal 18)**:
    - Sesuai instruksi soal, koordinat IP fiktif yang digunakan pada Soal 18 dinormalkan kembali ke alamat IP asli Abbey (`192.212.4.2`) dengan TTL default:
-     `zone
+     ```zone
      abbey   IN      A       192.212.4.2
-     `
+     ```
    - Serial SOA pada Master `prab` dinaikkan menjadi `2026092808`.
    - Zona dimuat ulang pada `prab` dan direplikasi secara otomatis ke slave `tedd`:
-     `ash
+     ```bash
      named-checkzone k02.com /etc/bind/k02/db.k02.com
      rndc reload
      service named restart
-     `
+     ```
 
 2. **Mekanisme Persistensi & Autostart Seluruh Layanan (System-Wide)**:
    - Seluruh layanan pada 14 entitas The Mesh telah dikonfigurasi memiliki dua lapis pertahanan persistensi:

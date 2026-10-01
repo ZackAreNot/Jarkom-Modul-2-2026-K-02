@@ -686,11 +686,11 @@ curl -i http://abbey.k02.com/
 - **Area Core (Apache2 - `oblada` & `molly`)**: `/etc/apache2/conf-available/remoteip.conf` & `/etc/apache2/apache2.conf`
 - **Berkas Log**: `/var/log/apache2/access.log`
 
-`ash
+```bash
 # Inspeksi konfigurasi remoteip pada backend (obladi / oblada):
 cat /etc/apache2/conf-available/remoteip.conf
 grep -E "%[ah]" /etc/apache2/apache2.conf
-`
+```
 
 ### 2. Parameter Kunci Konfigurasi
 - Modul `remoteip` aktif (`a2enmod remoteip`).
@@ -701,7 +701,7 @@ grep -E "%[ah]" /etc/apache2/apache2.conf
 - Format log diubah dari `%h` (IP koneksi langsung) menjadi `%a` (IP asli klien yang diekstrak oleh remoteip).
 
 ### 3. Perintah Verifikasi & Validasi
-`ash
+```bash
 # 1. Dari terminal klien alpha, lakukan request melalui gerbang:
 curl -I http://www.k02.com/
 curl -I http://static.k02.com/profil
@@ -711,7 +711,7 @@ tail -n 3 /var/log/apache2/access.log
 
 # 3. Periksa access log di backend Area Core (oblada / molly):
 tail -n 3 /var/log/apache2/access.log
-`
+```
 
 ### 4. Ekspektasi Output
 - Baris log akses diawali dengan alamat IP asli milik klien `alpha` (`192.212.2.2`), bukan IP milik Penny (`192.212.5.2`) ataupun Abbey (`192.212.4.2`).
@@ -724,7 +724,7 @@ tail -n 3 /var/log/apache2/access.log
 - **Penny**: `/etc/apache2/sites-available/000-default.conf` & `/var/www/eternal/index.php`
 - **Abbey**: `/etc/nginx/sites-available/default` & `/var/www/orion/index.html`
 
-`ash
+```bash
 # Inspeksi konfigurasi Penny:
 grep -A 10 "<Directory /var/www/eternal>" /etc/apache2/sites-available/000-default.conf
 cat /var/www/eternal/index.php
@@ -732,7 +732,7 @@ cat /var/www/eternal/index.php
 # Inspeksi konfigurasi Abbey:
 grep -A 5 "location /orion" /etc/nginx/sites-available/default
 cat /var/www/orion/index.html
-`
+```
 
 ### 2. Parameter Kunci Konfigurasi
 - **Penny (Apache2 + PHP)**:
@@ -743,7 +743,7 @@ cat /var/www/orion/index.html
   - Murni statis, tidak ada instruksi `fastcgi_pass`.
 
 ### 3. Perintah Verifikasi & Validasi
-`ash
+```bash
 # Dari node alpha:
 
 # 1. Uji jalur /eternal pada Penny (Wajib render PHP):
@@ -751,7 +751,7 @@ curl -i http://www.k02.com/eternal/
 
 # 2. Uji jalur /orion pada Abbey (Wajib murni statis):
 curl -i http://static.k02.com/orion/
-`
+```
 
 ### 4. Ekspektasi Output
 - Akses ke `/eternal/` mengembalikan respon `200 OK` dengan output eksekusi dinamis PHP (versi PHP & waktu server).
@@ -766,7 +766,7 @@ curl -i http://static.k02.com/orion/
 - **Paket**: `apache2-utils` (perintah `ab`)
 
 ### 2. Perintah Demonstrasi & Verifikasi
-`ash
+```bash
 # Di terminal node alpha:
 
 # 1. Stress test ke gerbang Penny (Vault):
@@ -774,7 +774,7 @@ ab -n 250 -c 10 http://www.k02.com/
 
 # 2. Stress test ke gerbang Abbey (Core):
 ab -n 250 -c 10 http://static.k02.com/
-`
+```
 
 ### 3. Poin Penjelasan ke Asisten
 - **Complete requests 250**: Seluruh 250 permintaan sukses dieksekusi secara konkuren 10 request bersamaan.
@@ -789,18 +789,18 @@ ab -n 250 -c 10 http://static.k02.com/
 - **DNS Master (prab)**: `/etc/bind/k02/db.k02.com`
 - **Skrip Otomasi**: `/root/setup_prab.sh` & [`scripts/setup_prab.sh`](scripts/setup_prab.sh)
 
-`ash
+```bash
 # Inspeksi TXT record pada zona Master (prab):
 grep -i "TXT" /etc/bind/k02/db.k02.com
-`
+```
 
 ### 2. Perintah Demonstrasi & Verifikasi
-`ash
+```bash
 # Di terminal node alpha:
 dig @192.212.1.2 alpha.k02.com TXT +short
 dig @192.212.1.2 beta.k02.com TXT +short
 dig @192.212.1.2 delta.k02.com TXT +short
-`
+```
 
 ### 3. Ekspektasi Output
 - Setiap query TXT mengembalikan nama host masing-masing dalam tanda kutip: \"alpha\", \"beta\", \"gamma\", \"delta\", \"epsilon\".
@@ -814,8 +814,16 @@ dig @192.212.1.2 delta.k02.com TXT +short
 - **DNS Slave (tedd)**: Sinkronisasi otomatis AXFR/IXFR
 
 ### 2. Perintah Demonstrasi & Verifikasi Tiga Fase
-`ash
-# Di terminal node alpha:
+```bash
+# Skenario: Simulasi pengujian DNS Caching & TTL 15 detik
+# (Jika diminta mendemonstrasikan secara langsung oleh asisten penguji):
+
+# Langkah A (Pada node prab): Ubah A record abbey menjadi IP fiktif 10.99.99.1 dengan TTL 15 detik:
+# sed -i 's/abbey\s\+IN\s\+A\s\+192.212.4.2/abbey   15      IN      A       10.99.99.1/' /etc/bind/k02/db.k02.com
+# sed -i 's/2026092808/2026092809/' /etc/bind/k02/db.k02.com
+# rndc reload
+
+# Di terminal node alpha (Klien):
 
 # Fase 1: Sebelum Perubahan (IP Asli)
 dig @192.212.1.2 abbey.k02.com +short
@@ -823,19 +831,20 @@ dig @192.212.1.2 abbey.k02.com +short
 # Verifikasi sinkronisasi di tedd (Slave):
 dig @192.212.1.3 abbey.k02.com +short
 
-# Fase 2: Observasi TTL 15 Detik
+# Fase 2: Observasi TTL 15 Detik (Memori Cache Klien Masih Menyimpan Data)
 dig abbey.k02.com
 
 # Fase 3: Setelah TTL Habis (sleep 16)
 sleep 16
 dig abbey.k02.com +short
-`
+```
 
 ### 3. Ekspektasi Output
-- Fase 1 mengembalikan 192.212.4.2.
-- Sinkronisasi Tedd mengembalikan 10.99.99.1.
-- Fase 2 memperlihatkan angka TTL 15 detik.
-- Fase 3 mengembalikan IP fiktif 10.99.99.1.
+- Fase 1 mengembalikan `192.212.4.2`.
+- Sinkronisasi Tedd mengembalikan `10.99.99.1`.
+- Fase 2 memperlihatkan angka TTL 15 detik yang menghitung mundur di cache.
+- Fase 3 mengembalikan IP fiktif `10.99.99.1`.
+- *Catatan*: Sesuai ketentuan **Soal 20**, setelah uji Soal 18 selesai, koordinat DNS `abbey.k02.com` dinormalkan kembali ke IP asli `192.212.4.2`.
 
 ---
 
@@ -844,13 +853,13 @@ dig abbey.k02.com +short
 ### 1. Berkas Konfigurasi & Script
 - **DNS Master (prab)**: `/etc/bind/k02/db.k02.com` (Record: `outbound IN CNAME http.badssl.com.`)
 
-`ash
+```bash
 # Inspeksi CNAME record di prab:
 grep "outbound" /etc/bind/k02/db.k02.com
-`
+```
 
 ### 2. Perintah Demonstrasi & Verifikasi
-`ash
+```bash
 # Di terminal node alpha:
 
 # 1. Resolusi CNAME dua tingkat:
@@ -861,12 +870,11 @@ curl -I http://outbound.k02.com
 
 # 3. Cuplikan konten HTML dari internet:
 curl -s http://outbound.k02.com | head -n 15
-`
+```
 
 ### 3. Ekspektasi Output
-- Query mengembalikan CNAME http.badssl.com. dan IP publik 104.154.89.105.
-- Curl mengembalikan status 200 OK dari server publik 
-ginx/1.10.3 (Ubuntu).
+- Query mengembalikan CNAME `http.badssl.com.` dan IP publik `104.154.89.105`.
+- Curl mengembalikan status `200 OK` dari server publik `nginx/1.10.3 (Ubuntu)`.
 
 ---
 
@@ -876,20 +884,20 @@ ginx/1.10.3 (Ubuntu).
 - **Normalisasi Abbey (prab)**: `/etc/bind/k02/db.k02.com` (Record: `abbey IN A 192.212.4.2`)
 - **Universal Init Script**: `/root/init.sh` di semua 14 entitas
 
-`ash
+```bash
 # Cek A record abbey kembali normal di prab:
 grep "abbey" /etc/bind/k02/db.k02.com
-`
+```
 
 ### 2. Perintah Demonstrasi & Verifikasi
-`ash
+```bash
 # Di terminal node alpha:
 dig @192.212.1.2 abbey.k02.com +short
 # Output wajib: 192.212.4.2
 
 # Uji eksekusi pemulihan instan di node mana saja (misal: penny / abbey / prab):
 bash /root/init.sh
-`
+```
 
 ### 3. Poin Penjelasan ke Asisten
 - **Koordinat Normal**: IP fiktif Soal 18 telah dikembalikan ke koordinat aslinya (192.212.4.2) agar seluruh arsitektur reverse proxy The Mesh berjalan normal kembali.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# setup_prab.sh — Authoritative DNS Master (NS1) for k02.com
+# setup_prab.sh â€” Authoritative DNS Master (NS1) for k02.com
 # Praktikum Modul 2 Jarkom 2026 - Kelompok K-02
 # Memuat:
 # - Seluruh A & CNAME Record The Mesh (Soal 4, 5, 7)
@@ -67,7 +67,7 @@ mkdir -p /etc/bind/k02
 cat << 'EOF' > /etc/bind/k02/db.k02.com
 $TTL    604800
 @       IN      SOA     prab.k02.com. root.k02.com. (
-                              2026092805         ; Serial
+                              2026092808         ; Serial (Soal 20 Normalized)
                                   604800         ; Refresh
                                    86400         ; Retry
                                  2419200         ; Expire
@@ -109,6 +109,9 @@ core    IN      A       192.212.1.7
 ; Kanonik CNAME
 www     IN      CNAME   penny.k02.com.
 static  IN      CNAME   abbey.k02.com.
+
+; Soal 19: External CNAME Binding
+outbound IN     CNAME   http.badssl.com.
 
 ; Soal 17: TXT Records Klien Sayap Kiri & Kanan
 alpha   IN      TXT     "alpha"

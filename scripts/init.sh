@@ -30,6 +30,20 @@ set_gateway_resolver() {
     echo "nameserver 192.168.122.1" > /etc/resolv.conf
 }
 
+# Helper: Setup mod_remoteip untuk Apache backend (Soal 14)
+setup_remoteip() {
+    if [ -f /usr/sbin/a2enmod ]; then
+        a2enmod remoteip 2>/dev/null || true
+        cat << 'EOF' > /etc/apache2/conf-available/remoteip.conf
+RemoteIPHeader X-Real-IP
+RemoteIPInternalProxy 192.212.5.2
+RemoteIPInternalProxy 192.212.4.2
+EOF
+        a2enconf remoteip 2>/dev/null || true
+        sed -i 's/%h /%a /g' /etc/apache2/apache2.conf 2>/dev/null || true
+    fi
+}
+
 # Pastikan hostname system-wide
 echo "$NODE_LOWER" > /etc/hostname 2>/dev/null || true
 hostname "$NODE_LOWER" 2>/dev/null || true
@@ -173,6 +187,7 @@ EOF
         else
             service apache2 restart 2>/dev/null || true
         fi
+        setup_remoteip
         if [ ! -f /var/www/html/index.html ] || grep -q "Apache2 Debian Default Page" /var/www/html/index.html 2>/dev/null; then
             cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html><html><body><h1>Area Vault Storage - Node OBLADI</h1></body></html>
@@ -200,6 +215,7 @@ EOF
         else
             service apache2 restart 2>/dev/null || true
         fi
+        setup_remoteip
         if [ ! -f /var/www/html/index.html ] || grep -q "Apache2 Debian Default Page" /var/www/html/index.html 2>/dev/null; then
             cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html><html><body><h1>Area Vault Storage - Node DESMOND</h1></body></html>
@@ -229,6 +245,7 @@ EOF
             service php8.4-fpm restart 2>/dev/null || true
             service apache2 restart 2>/dev/null || true
         fi
+        setup_remoteip
         echo "[OK] oblada siap!"
         ;;
 
@@ -253,6 +270,7 @@ EOF
             service php8.4-fpm restart 2>/dev/null || true
             service apache2 restart 2>/dev/null || true
         fi
+        setup_remoteip
         echo "[OK] molly siap!"
         ;;
 
@@ -268,6 +286,7 @@ EOF
         ip addr replace 192.212.2.2/24 dev eth0 2>/dev/null || true
         ip route replace default via 192.212.2.1 dev eth0 2>/dev/null || true
         set_client_resolver
+        which ab >/dev/null 2>&1 || (apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y apache2-utils) 2>/dev/null || true
         echo "[OK] alpha siap!"
         ;;
 
@@ -345,7 +364,7 @@ EOF
         ip route replace default via 192.212.4.1 dev eth0 2>/dev/null || true
         set_client_resolver
 
-        if [ ! -f /etc/nginx/sites-available/default ] && [ -f /root/setup_proxy.sh ]; then
+        if [ ! -d /var/www/orion ] && [ -f /root/setup_proxy.sh ]; then
             bash /root/setup_proxy.sh || true
         else
             service nginx restart 2>/dev/null || true
@@ -362,14 +381,16 @@ iface eth0 inet static
     netmask 255.255.255.0
     gateway 192.212.5.1
     up service apache2 start || true
+    up service php8.4-fpm start || true
 EOF
         ip addr replace 192.212.5.2/24 dev eth0 2>/dev/null || true
         ip route replace default via 192.212.5.1 dev eth0 2>/dev/null || true
         set_client_resolver
 
-        if [ ! -f /etc/apache2/sites-available/000-default.conf ] && [ -f /root/setup_proxy.sh ]; then
+        if [ ! -d /var/www/eternal ] && [ -f /root/setup_proxy.sh ]; then
             bash /root/setup_proxy.sh || true
         else
+            service php8.4-fpm restart 2>/dev/null || true
             service apache2 restart 2>/dev/null || true
         fi
         echo "[OK] penny siap!"
