@@ -576,13 +576,19 @@ cat /etc/nginx/sites-available/default
 # Pada terminal klien (alpha / beta):
 
 # 1. Uji Load Balancing Penny -> Vault (Obladi & Desmond):
-for i in 1 2 3 4; do curl -s http://penny.k02.com/ | grep "Node "; done
+# Catatan: Gunakan opsi -L jika redirect Soal 13 telah aktif, atau uji langsung domain kanonik www.k02.com:
+for i in 1 2 3 4; do curl -sL http://penny.k02.com/ | grep "Node "; done
+# Atau:
+for i in 1 2 3 4; do curl -s http://www.k02.com/ | grep "Node "; done
 
 # 2. Uji Load Balancing Abbey -> Core (Oblada & Molly):
-for i in 1 2 3 4; do curl -s http://abbey.k02.com/profil | grep Identitas; done
+# Catatan: Gunakan opsi -L jika redirect Soal 13 telah aktif, atau uji langsung domain kanonik static.k02.com:
+for i in 1 2 3 4; do curl -sL http://abbey.k02.com/profil | grep Identitas; done
+# Atau:
+for i in 1 2 3 4; do curl -s http://static.k02.com/profil | grep Identitas; done
 
 # 3. Uji Forwarding Header Host dan X-Real-IP:
-curl -i http://abbey.k02.com/profil
+curl -iL http://abbey.k02.com/profil
 ```
 
 ### 4. Ekspektasi Output

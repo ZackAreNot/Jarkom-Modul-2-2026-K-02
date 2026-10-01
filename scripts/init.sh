@@ -173,6 +173,11 @@ EOF
         else
             service apache2 restart 2>/dev/null || true
         fi
+        if [ ! -f /var/www/html/index.html ] || grep -q "Apache2 Debian Default Page" /var/www/html/index.html 2>/dev/null; then
+            cat << 'EOF' > /var/www/html/index.html
+<!DOCTYPE html><html><body><h1>Area Vault Storage - Node OBLADI</h1></body></html>
+EOF
+        fi
         echo "[OK] obladi siap!"
         ;;
 
@@ -194,6 +199,11 @@ EOF
             bash /root/setup_vault.sh || true
         else
             service apache2 restart 2>/dev/null || true
+        fi
+        if [ ! -f /var/www/html/index.html ] || grep -q "Apache2 Debian Default Page" /var/www/html/index.html 2>/dev/null; then
+            cat << 'EOF' > /var/www/html/index.html
+<!DOCTYPE html><html><body><h1>Area Vault Storage - Node DESMOND</h1></body></html>
+EOF
         fi
         echo "[OK] desmond siap!"
         ;;

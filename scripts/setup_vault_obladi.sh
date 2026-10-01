@@ -25,7 +25,22 @@ echo "CONFIDENTIAL PDF DUMMY" > /var/www/html/arsip/secret_data.pdf
 # Remove any default index files to trigger autoindex
 rm -f /var/www/html/arsip/index.html /var/www/html/arsip/index.php
 
-chown -R www-data:www-data /var/www/html/arsip
+# Create root index with Node identifier for reverse proxy load balancing
+cat << 'EOF' > /var/www/html/index.html
+<!DOCTYPE html>
+<html>
+<head><title>Area Vault - Obladi</title></head>
+<body>
+<h1>Area Vault Storage - Node OBLADI</h1>
+<p>Server IP: 192.212.1.4</p>
+<p>Status: Active Backend Node 1</p>
+<hr>
+<p><a href="/arsip/">Lihat Arsip (/arsip/)</a></p>
+</body>
+</html>
+EOF
+
+chown -R www-data:www-data /var/www/html
 chmod -R 755 /var/www/html/arsip
 
 echo "[+] Configuring Apache directory listing for /arsip/..."
