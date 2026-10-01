@@ -68,6 +68,25 @@ Seluruh konfigurasi jaringan, resolver DNS, dan service aplikasi telah diotomasi
 
 ---
 
+## 3. Matriks Error Handling & Fast Troubleshooting Selama Demo
+
+Jika selama sesi demonstrasi terjadi kendala jaringan atau layanan yang belum aktif/berhenti, gunakan matriks solusi cepat berikut:
+
+| Masalah / Gejala | Kemungkinan Penyebab | Node Target | Perintah Cepat Pemulihan (Fast Fix) |
+|---|---|---|---|
+| **DNS Timeout / Query Gagal** (`connection timed out; no servers could be reached`) | Daemon BIND9 di `prab` atau `tedd` mati / belum berjalan | `prab` / `tedd` | `service named restart || /usr/sbin/named -u bind`<br>`rndc reload` |
+| **Klien Gagal Me-resolve Domain `*.k02.com`** | Berkas `/etc/resolv.conf` di klien ter-reset atau hilang | Klien (`alpha`, dll) | `echo -e "nameserver 192.212.1.2\nnameserver 192.212.1.3\nnameserver 192.168.122.1" > /etc/resolv.conf` |
+| **DNS Slave (`tedd`) Tidak Sinkron** (Record/Serial berbeda dengan `prab`) | AXFR/IXFR replikasi zona belum ditarik oleh slave | `tedd` | `rndc retransfer k02.com`<br>`rndc reload`<br>`service named restart` |
+| **HTTP 502 Bad Gateway (di Abbey) atau HTTP 503 (di Penny)** | Layanan web backend belum aktif atau crash | `obladi`, `desmond`, `oblada`, `molly` | **Vault**: `service apache2 restart`<br>**Core**: `service php8.4-fpm restart && service apache2 restart` |
+| **Hasil Grep Load Balancing Kosong (*Blank*)** | Redirect 301/302 (Soal 13) aktif sehingga curl menangkap respon 301/302 | Klien (`alpha` / `beta`) | Gunakan flag `-L` atau panggil domain kanonik:<br>`for i in 1 2 3 4; do curl -sL http://penny.k02.com/ | grep "Node "; done`<br>`for i in 1 2 3 4; do curl -s http://www.k02.com/ | grep "Node "; done` |
+| **Akses `/admin` Mengembalikan 301 Bukan 200 OK** | Path folder fisik tanpa *trailing slash* (`/`) memicu redirect internal `mod_dir` | Klien (`alpha`) | Tambahkan garis miring penutup (`/admin/`):<br>`curl -i -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin/`<br>atau gunakan `-L`: `curl -iL -u ... http://penny.k02.com/admin` |
+| **Clean URL `/profil` Mengembalikan 404 Not Found** | Modul `rewrite` belum aktif atau Apache belum dimuat ulang | `oblada` / `molly` | `a2enmod rewrite proxy_fcgi`<br>`service apache2 restart` |
+| **Jalur `/eternal` atau `/orion` Mengembalikan 404 Not Found** | Service web proxy atau PHP-FPM di gerbang belum ter-reload | `penny` / `abbey` | **Penny**: `service php8.4-fpm restart && service apache2 restart`<br>**Abbey**: `nginx -t && service nginx restart` |
+| **Tidak Bisa Ping Internet (`google.com` / `http.badssl.com` RTO)** | NAT Masquerade pada router `rootkit` hilang / `ip_forward` nonaktif | `rootkit` | `sysctl -w net.ipv4.ip_forward=1`<br>`iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE` |
+| **Tombol Panik Universal (*The Ultimate Panic Button*)** | Konfigurasi node berantakan / node baru di-reboot oleh penguji | **Node Terkait Mana Saja** | Jalankan skrip inisialisasi universal (otomatis memperbaiki IP, gateway, DNS resolver, dan menyalakan semua daemon):<br>`bash /root/init.sh` |
+
+---
+
 ## Soal 1: Penetapan Alamat IP & Default Gateway Seluruh Entitas
 
 ### 1. Berkas Konfigurasi & Script
