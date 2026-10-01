@@ -337,8 +337,10 @@ grep -E "vault|core|www|static" /etc/bind/k02/db.k02.com
   - `vault.k02.com.` memiliki 2 A record: `192.212.1.4` (obladi) dan `192.212.1.5` (desmond).
   - `core.k02.com.` memiliki 2 A record: `192.212.1.6` (oblada) dan `192.212.1.7` (molly).
 - **CNAME Records**:
-  - `www.k02.com.` $ightarrow$ `penny.k02.com.`
-  - `static.k02.com.` $ightarrow$ `abbey.k02.com.`
+  - `www.k02.com.` $
+ightarrow$ `penny.k02.com.`
+  - `static.k02.com.` $
+ightarrow$ `abbey.k02.com.`
 - Serial SOA dinaikkan menjadi `2026092803`.
 
 ### 3. Perintah Verifikasi & Validasi
@@ -636,7 +638,10 @@ curl -i http://penny.k02.com/admin
 curl -i -u prabs:salah http://penny.k02.com/admin
 
 # 3. Akses dengan kredensial benar (Wajib 200 OK):
-curl -i -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin
+# Gunakan akhiran trailing slash (/) karena admin adalah direktori fisik, atau tambahkan -L:
+curl -i -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin/
+# Atau:
+curl -iL -u prabs:pakar_pinter_jadi_goblok http://penny.k02.com/admin
 ```
 
 ### 4. Ekspektasi Output
